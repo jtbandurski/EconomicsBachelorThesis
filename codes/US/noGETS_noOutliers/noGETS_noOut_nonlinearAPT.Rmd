@@ -1,0 +1,350 @@
+---
+title: "nonlinearAPT"
+author: "Jakub Bandurski"
+date: '2022-03-15'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Nonlinear APT models
+
+Poniższy R Markdown zawiera kody realizującę regresje na szeregach szasowych szukający nieliniowych zależności oczekiwanej stopy zwrotów z portfeli względem czynników z 3-czynnikowego modelu Fama-French oraz 4-czynnikowego rozszerzenia Caharta. Użyte dane pochodzą z bazy danych ze strony K. Frencha <https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/data_library.html>.
+
+```{r, results='hide', message=FALSE, warning=FALSE}
+#Biblioteki
+library(ggplot2)
+library(lmtest)
+library(tseries)
+library(portes)
+library(sandwich)
+library(car)
+library(dynlm)
+library(xlsx)
+```
+
+## Import danych USA
+
+```{r}
+katalog = "Z:/Kuba/Studia/uw/licencjatWNE/kody/dane"
+#Dane USA
+#Wartości 3 czynnikow FF; 1 kolumna - data 2,3,4 kolumna - czynniki
+Monthly3FF <- read.csv(paste(katalog, "F-F_Research_Data_Factors.CSV", sep="/"), skip=3, stringsAsFactors=FALSE)
+colnames(Monthly3FF) <- c("Date", "Mkt.RF", "SMB", "HML","RF")
+Monthly3FF <- Monthly3FF[1:1147,]
+Monthly3FF <- transform(Monthly3FF,
+                        Mkt.RF=as.numeric(Mkt.RF),
+                        SMB=as.numeric(SMB),
+                        HML=as.numeric(HML),
+                        RF=as.numeric(RF))
+
+#Portfele 2x3 Size and Book to Market
+Portfolios2x3 <- read.csv(paste(katalog, "6_Portfolios_2x3.CSV", sep="/"), skip=15, stringsAsFactors=FALSE)
+colnames(Portfolios2x3) <- c("Date",'SMALL.LoBM','ME1.BM2','SMALL.HiBM','BIG.LoBM','ME2.BM2','BIG.HiBM')
+Portfolios2x3 <- Portfolios2x3[1:1147,]
+Portfolios2x3 <- transform(Portfolios2x3,
+                        SMALL.LoBM=as.numeric(SMALL.LoBM),
+                        ME1.BM2=as.numeric(ME1.BM2),
+                        SMALL.HiBM=as.numeric(SMALL.HiBM),
+                        BIG.LoBM=as.numeric(BIG.LoBM),
+                        ME2.BM2=as.numeric(ME2.BM2),
+                        BIG.HiBM=as.numeric(BIG.HiBM))
+
+#Połączone dane
+Dane3FF <- merge(Monthly3FF, Portfolios2x3, by = "Date")
+```
+## Statystyki
+```{r}
+cor(Monthly3FF[2:5], method="pearson")
+cor(Portfolios2x3[2:7], method="pearson")
+summary(Monthly3FF)
+t(sapply(Monthly3FF[2:5],function(x) c(mean=mean(x),sd=sd(x),min=min(x),median=median(x),max=max(x))))
+t(sapply(Portfolios2x3[2:7],function(x) c(mean=mean(x),sd=sd(x),min=min(x),median=median(x),max=max(x))))
+```
+
+
+## Model szescienny z interakcjami
+
+```{r}
+# funkcja
+
+regression <- function(portfolio, name){
+    model <- lm(portfolio ~ Mkt.RF + I(Mkt.RF^2) + I(Mkt.RF^3) + SMB + I(SMB^2) + 
+                   I(SMB^3) + HML + I(HML^2)+ I(HML^3) + Mkt.RF:SMB + Mkt.RF:HML + SMB:HML, data=Dane3FF)
+  
+  Coef = data.frame()
+  Stats = data.frame()
+  Coef=t(as.data.frame(rbind(coeftest(model, vcov.=vcovHAC(model))[,1],
+                       coeftest(model, vcov.=vcovHAC(model))[,4])))
+  
+  #p-v ^2=0
+  Stats<-rbind(Stats,linearHypothesis(model, c("I(Mkt.RF^2)","I(SMB^2)","I(HML^2)"))["Pr(>F)"][2,])
+  #p-v ^3=0
+  Stats<-rbind(Stats,linearHypothesis(model, c("I(Mkt.RF^3)","I(SMB^3)","I(HML^3)"))["Pr(>F)"][2,])
+  #p-v inter=0
+  Stats<-rbind(Stats,linearHypothesis(model, c("Mkt.RF:SMB","Mkt.RF:HML","SMB:HML"))["Pr(>F)"][2,])
+  #p-v ^2=0 i ^3=0
+  Stats<-rbind(Stats,linearHypothesis(model, c("I(Mkt.RF^2)","I(SMB^2)","I(HML^2)",
+                                                   "I(Mkt.RF^3)","I(SMB^3)","I(HML^3)"))["Pr(>F)"][2,])
+  #p-v ^2=0 i ^3=0 i inter=0
+  Stats<-rbind(Stats,linearHypothesis(model, c("I(Mkt.RF^2)","I(SMB^2)","I(HML^2)",
+                                                   "I(Mkt.RF^3)","I(SMB^3)","I(HML^3)",
+                                                 "Mkt.RF:SMB","Mkt.RF:HML","SMB:HML"))["Pr(>F)"][2,])
+  #rest fit
+  Stats<-rbind(Stats,resettest(model, power=2:3, type="fitted")$p.value)
+  #rest reg (rhs)
+  Stats<-rbind(Stats,resettest(model, power=2:3, type="regressor")$p.value)
+  #Breusch-Godfrey
+  Stats<-rbind(Stats,bgtest(model, order = 1)$p.value)
+  #R^2
+  Stats<-rbind(Stats,summary(model)$r.squared)
+  #Adjusted R^2
+  Stats<-rbind(Stats,summary(model)$adj.r.squared)
+  #AIC
+  Stats<-rbind(Stats,AIC(model))
+  #SIC
+  Stats<-rbind(Stats,BIC(model))
+  #N
+  Stats<-rbind(Stats,summary(model)$df[1]+summary(model)$df[2])
+  
+  write.xlsx(Coef, paste("all_",name, ".xlsx", sep=""), sheetName="Coef")
+  write.xlsx(Stats, paste("all_",name,".xlsx", sep=""), sheetName="Stats", append=TRUE)
+}
+
+regression(Dane3FF$SMALL.LoBM, "SMALL.LoBM")
+regression(Dane3FF$ME1.BM2, "ME1.BM2")
+regression(Dane3FF$SMALL.HiBM, "SMALL.HiBM")
+regression(Dane3FF$BIG.LoBM, "BIG.LoBM")
+regression(Dane3FF$ME2.BM2, "ME2.BM2")
+regression(Dane3FF$BIG.HiBM, "BIG.HiBM")
+```
+
+## Model szescienny 
+
+```{r}
+# funkcja
+
+regression <- function(portfolio, name){
+    model <- lm(portfolio ~ Mkt.RF + I(Mkt.RF^2) + I(Mkt.RF^3) + SMB + I(SMB^2) + 
+                   I(SMB^3) + HML + I(HML^2) + I(HML^3) , data=Dane3FF)
+  
+  Coef = data.frame()
+  Stats = data.frame()
+  Coef=t(as.data.frame(rbind(coeftest(model, vcov.=vcovHAC(model))[,1],
+                       coeftest(model, vcov.=vcovHAC(model))[,4])))
+  
+  #p-v ^2=0
+  Stats<-rbind(Stats,linearHypothesis(model, c("I(Mkt.RF^2)","I(SMB^2)","I(HML^2)"))["Pr(>F)"][2,])
+  #p-v ^3=0
+  Stats<-rbind(Stats,linearHypothesis(model, c("I(Mkt.RF^3)","I(SMB^3)","I(HML^3)"))["Pr(>F)"][2,])
+  #p-v ^2=0 i ^3=0
+  Stats<-rbind(Stats,linearHypothesis(model, c("I(Mkt.RF^2)","I(SMB^2)","I(HML^2)",
+                                                   "I(Mkt.RF^3)","I(SMB^3)","I(HML^3)"))["Pr(>F)"][2,])
+  #rest fit
+  Stats<-rbind(Stats,resettest(model, power=2:3, type="fitted")$p.value)
+  #rest reg (rhs)
+  Stats<-rbind(Stats,resettest(model, power=2:3, type="regressor")$p.value)
+  #Breusch-Godfrey
+  Stats<-rbind(Stats,bgtest(model, order = 1)$p.value)
+  #R^2
+  Stats<-rbind(Stats,summary(model)$r.squared)
+  #Adjusted R^2
+  Stats<-rbind(Stats,summary(model)$adj.r.squared)
+  #AIC
+  Stats<-rbind(Stats,AIC(model))
+  #SIC
+  Stats<-rbind(Stats,BIC(model))
+  #N
+  Stats<-rbind(Stats,summary(model)$df[1]+summary(model)$df[2])
+  
+  write.xlsx(Coef, paste("cubic_",name,".xlsx", sep=""), sheetName="Coef")
+  write.xlsx(Stats, paste("cubic_",name,".xlsx", sep=""), sheetName="Stats", append=TRUE)
+}
+
+regression(Dane3FF$SMALL.LoBM, "SMALL.LoBM")
+regression(Dane3FF$ME1.BM2, "ME1.BM2")
+regression(Dane3FF$SMALL.HiBM, "SMALL.HiBM")
+regression(Dane3FF$BIG.LoBM, "BIG.LoBM")
+regression(Dane3FF$ME2.BM2, "ME2.BM2")
+regression(Dane3FF$BIG.HiBM, "BIG.HiBM")
+```
+## Model kwadratowy z interakcjami
+
+```{r}
+# funkcja
+
+regression <- function(portfolio, name){
+    model <- lm(portfolio ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) + HML + I(HML^2)
+                + Mkt.RF:SMB + Mkt.RF:HML + SMB:HML, data=Dane3FF)
+  
+  Coef = data.frame()
+  Stats = data.frame()
+  Coef=t(as.data.frame(rbind(coeftest(model, vcov.=vcovHAC(model))[,1],
+                       coeftest(model, vcov.=vcovHAC(model))[,4])))
+  
+  #p-v ^2=0
+  Stats<-rbind(Stats,linearHypothesis(model, c("I(Mkt.RF^2)","I(SMB^2)","I(HML^2)"))["Pr(>F)"][2,])
+  #p-v inter=0
+  Stats<-rbind(Stats,linearHypothesis(model, c("Mkt.RF:SMB","Mkt.RF:HML","SMB:HML"))["Pr(>F)"][2,])
+  #p-v ^2=0  i inter=0
+  Stats<-rbind(Stats,linearHypothesis(model, c("I(Mkt.RF^2)","I(SMB^2)","I(HML^2)",
+                                                 "Mkt.RF:SMB","Mkt.RF:HML","SMB:HML"))["Pr(>F)"][2,])
+  #rest fit
+  Stats<-rbind(Stats,resettest(model, power=2:3, type="fitted")$p.value)
+  #rest reg (rhs)
+  Stats<-rbind(Stats,resettest(model, power=2:3, type="regressor")$p.value)
+  #Breusch-Godfrey
+  Stats<-rbind(Stats,bgtest(model, order = 1)$p.value)
+  #R^2
+  Stats<-rbind(Stats,summary(model)$r.squared)
+  #Adjusted R^2
+  Stats<-rbind(Stats,summary(model)$adj.r.squared)
+  #AIC
+  Stats<-rbind(Stats,AIC(model))
+  #SIC
+  Stats<-rbind(Stats,BIC(model))
+  #N
+  Stats<-rbind(Stats,summary(model)$df[1]+summary(model)$df[2])
+  
+  write.xlsx(Coef, paste("quadratic_interactions_",name, ".xlsx", sep=""), sheetName="Coef")
+  write.xlsx(Stats, paste("quadratic_interactions_",name,".xlsx", sep=""), sheetName="Stats", append=TRUE)
+}
+
+regression(Dane3FF$SMALL.LoBM, "SMALL.LoBM")
+regression(Dane3FF$ME1.BM2, "ME1.BM2")
+regression(Dane3FF$SMALL.HiBM, "SMALL.HiBM")
+regression(Dane3FF$BIG.LoBM, "BIG.LoBM")
+regression(Dane3FF$ME2.BM2, "ME2.BM2")
+regression(Dane3FF$BIG.HiBM, "BIG.HiBM")
+```
+## Model kwadratowy
+
+```{r}
+# funkcja
+
+regression <- function(portfolio, name){
+    model <- lm(portfolio ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) + HML + I(HML^2), data=Dane3FF)
+  
+  Coef = data.frame()
+  Stats = data.frame()
+  Coef=t(as.data.frame(rbind(coeftest(model, vcov.=vcovHAC(model))[,1],
+                       coeftest(model, vcov.=vcovHAC(model))[,4])))
+  
+  #p-v ^2=0
+  Stats<-rbind(Stats,linearHypothesis(model, c("I(Mkt.RF^2)","I(SMB^2)","I(HML^2)"))["Pr(>F)"][2,])
+  #rest fit
+  Stats<-rbind(Stats,resettest(model, power=2:3, type="fitted")$p.value)
+  #rest reg (rhs)
+  Stats<-rbind(Stats,resettest(model, power=2:3, type="regressor")$p.value)
+  #Breusch-Godfrey
+  Stats<-rbind(Stats,bgtest(model, order = 1)$p.value)
+  #R^2
+  Stats<-rbind(Stats,summary(model)$r.squared)
+  #Adjusted R^2
+  Stats<-rbind(Stats,summary(model)$adj.r.squared)
+  #AIC
+  Stats<-rbind(Stats,AIC(model))
+  #SIC
+  Stats<-rbind(Stats,BIC(model))
+  #N
+  Stats<-rbind(Stats,summary(model)$df[1]+summary(model)$df[2])
+  
+  write.xlsx(Coef, paste("quadratic_n",name, ".xlsx", sep=""), sheetName="Coef")
+  write.xlsx(Stats, paste("quadratic_n",name,".xlsx", sep=""), sheetName="Stats", append=TRUE)
+}
+
+regression(Dane3FF$SMALL.LoBM, "SMALL.LoBM")
+regression(Dane3FF$ME1.BM2, "ME1.BM2")
+regression(Dane3FF$SMALL.HiBM, "SMALL.HiBM")
+regression(Dane3FF$BIG.LoBM, "BIG.LoBM")
+regression(Dane3FF$ME2.BM2, "ME2.BM2")
+regression(Dane3FF$BIG.HiBM, "BIG.HiBM")
+```
+## Model liniowy z interakcjami
+
+```{r}
+# funkcja
+
+regression <- function(portfolio, name){
+    model <- lm(portfolio ~ Mkt.RF + SMB + HML + Mkt.RF:SMB + Mkt.RF:HML + SMB:HML, data=Dane3FF)
+  
+  Coef = data.frame()
+  Stats = data.frame()
+  Coef=t(as.data.frame(rbind(coeftest(model, vcov.=vcovHAC(model))[,1],
+                       coeftest(model, vcov.=vcovHAC(model))[,4])))
+  
+
+  #p-v inter=0
+  Stats<-rbind(Stats,linearHypothesis(model, c("Mkt.RF:SMB","Mkt.RF:HML","SMB:HML"))["Pr(>F)"][2,])
+  #rest fit
+  Stats<-rbind(Stats,resettest(model, power=2:3, type="fitted")$p.value)
+  #rest reg (rhs)
+  Stats<-rbind(Stats,resettest(model, power=2:3, type="regressor")$p.value)
+  #Breusch-Godfrey
+  Stats<-rbind(Stats,bgtest(model, order = 1)$p.value)
+  #R^2
+  Stats<-rbind(Stats,summary(model)$r.squared)
+  #Adjusted R^2
+  Stats<-rbind(Stats,summary(model)$adj.r.squared)
+  #AIC
+  Stats<-rbind(Stats,AIC(model))
+  #SIC
+  Stats<-rbind(Stats,BIC(model))
+  #N
+  Stats<-rbind(Stats,summary(model)$df[1]+summary(model)$df[2])
+  
+  write.xlsx(Coef, paste("linear_interactions_",name, ".xlsx", sep=""), sheetName="Coef")
+  write.xlsx(Stats, paste("linear_interactions_",name,".xlsx", sep=""), sheetName="Stats", append=TRUE)
+}
+
+regression(Dane3FF$SMALL.LoBM, "SMALL.LoBM")
+regression(Dane3FF$ME1.BM2, "ME1.BM2")
+regression(Dane3FF$SMALL.HiBM, "SMALL.HiBM")
+regression(Dane3FF$BIG.LoBM, "BIG.LoBM")
+regression(Dane3FF$ME2.BM2, "ME2.BM2")
+regression(Dane3FF$BIG.HiBM, "BIG.HiBM")
+```
+## Model liniowy
+
+```{r}
+# funkcja
+
+regression <- function(portfolio, name){
+    model <- lm(portfolio ~ Mkt.RF + SMB + HML, data=Dane3FF)
+  
+  Coef = data.frame()
+  Stats = data.frame()
+  Coef=t(as.data.frame(rbind(coeftest(model, vcov.=vcovHAC(model))[,1],
+                       coeftest(model, vcov.=vcovHAC(model))[,4])))
+  
+
+  #rest fit
+  Stats<-rbind(Stats,resettest(model, power=2:3, type="fitted")$p.value)
+  #rest reg (rhs)
+  Stats<-rbind(Stats,resettest(model, power=2:3, type="regressor")$p.value)
+  #Breusch-Godfrey
+  Stats<-rbind(Stats,bgtest(model, order = 1)$p.value)
+  #R^2
+  Stats<-rbind(Stats,summary(model)$r.squared)
+  #Adjusted R^2
+  Stats<-rbind(Stats,summary(model)$adj.r.squared)
+  #AIC
+  Stats<-rbind(Stats,AIC(model))
+  #SIC
+  Stats<-rbind(Stats,BIC(model))
+  #N
+  Stats<-rbind(Stats,summary(model)$df[1]+summary(model)$df[2])
+  
+  write.xlsx(Coef, paste("linear_n",name, ".xlsx", sep=""), sheetName="Coef")
+  write.xlsx(Stats, paste("linear_n",name,".xlsx", sep=""), sheetName="Stats", append=TRUE)
+}
+
+regression(Dane3FF$SMALL.LoBM, "SMALL.LoBM")
+regression(Dane3FF$ME1.BM2, "ME1.BM2")
+regression(Dane3FF$SMALL.HiBM, "SMALL.HiBM")
+regression(Dane3FF$BIG.LoBM, "BIG.LoBM")
+regression(Dane3FF$ME2.BM2, "ME2.BM2")
+regression(Dane3FF$BIG.HiBM, "BIG.HiBM")
+```

@@ -1,0 +1,2368 @@
+---
+title: "nonlinearAPT"
+author: "Jakub Bandurski"
+date: '2022-03-15'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Nonlinear APT models
+
+Poniższy R Markdown zawiera kody realizującę regresje na szeregach szasowych szukający nieliniowych zależności oczekiwanej stopy zwrotów z portfeli względem czynników z 3-czynnikowego modelu Fama-French oraz 4-czynnikowego rozszerzenia Caharta. Użyte dane pochodzą z bazy danych ze strony K. Frencha <https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/data_library.html>.
+
+```{r, results='hide', message=FALSE, warning=FALSE}
+#Biblioteki
+library(ggplot2)
+library(lmtest)
+library(tseries)
+library(portes)
+library(sandwich)
+library(car)
+library(dynlm)
+library(xlsx)
+```
+
+## Import danych EU
+
+```{r}
+katalog = "Z:/Kuba/Studia/uw/licencjatWNE/kody/dane"
+#Dane EU
+#Wartości 3 czynnikow FF; 1 kolumna - data 2,3,4 kolumna - czynniki
+Monthly3FF <- read.csv(paste(katalog, "Europe_3_Factors.CSV", sep="/"), skip=6, nrows=379, stringsAsFactors=FALSE)
+colnames(Monthly3FF) <- c("Date", "Mkt.RF", "SMB", "HML","RF")
+Monthly3FF <- transform(Monthly3FF,
+                        Mkt.RF=as.numeric(Mkt.RF),
+                        SMB=as.numeric(SMB),
+                        HML=as.numeric(HML),
+                        RF=as.numeric(RF))
+
+#Portfele 2x3 Size and Book to Market
+Portfolios2x3 <- read.csv(paste(katalog, "Europe_6_Portfolios_ME_BE-ME.CSV", sep="/"), skip=20,nrows=379, stringsAsFactors=FALSE)
+colnames(Portfolios2x3) <- c("Date",'SMALL.LoBM','ME1.BM2','SMALL.HiBM','BIG.LoBM','ME2.BM2','BIG.HiBM')
+Portfolios2x3 <- transform(Portfolios2x3,
+                        SMALL.LoBM=as.numeric(SMALL.LoBM),
+                        ME1.BM2=as.numeric(ME1.BM2),
+                        SMALL.HiBM=as.numeric(SMALL.HiBM),
+                        BIG.LoBM=as.numeric(BIG.LoBM),
+                        ME2.BM2=as.numeric(ME2.BM2),
+                        BIG.HiBM=as.numeric(BIG.HiBM))
+
+#Połączone dane
+Dane3FF <- merge(Monthly3FF, Portfolios2x3, by = "Date")
+```
+
+## Model szescienny z interakcjami
+
+```{r}
+model13 = lm(SMALL.LoBM ~ Mkt.RF + I(Mkt.RF^2) + I(Mkt.RF^3) + SMB + I(SMB^2) + I(SMB^3) + HML + I(HML^2)+ I(HML^3) + Mkt.RF:SMB + Mkt.RF:HML + SMB:HML, data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+resettest(model13, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(model13, vcov.=vcovHAC(model13))
+#normalnosc reszt
+jarque.bera.test(model13$residuals)
+
+#GETS----
+linearHypothesis(model13, c("Mkt.RF:SMB"), vcov.=vcovHAC(model13))
+G1model13 = lm(SMALL.LoBM ~ Mkt.RF + I(Mkt.RF^2) + I(Mkt.RF^3) + SMB + I(SMB^2) + I(SMB^3) + HML + I(HML^2)+ I(HML^3) + Mkt.RF:HML + SMB:HML, data=Dane3FF)
+#rest
+resettest(G1model13, power=2:3, type="fitted")
+coeftest(G1model13, vcov.=vcovHAC(G1model13))
+
+linearHypothesis(model13, c("Mkt.RF:SMB","I(Mkt.RF^3)"), vcov.=vcovHAC(model13))
+G2model13 = lm(SMALL.LoBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) + I(SMB^3) + HML + I(HML^2)+ I(HML^3) + Mkt.RF:HML + SMB:HML, data=Dane3FF)
+#rest
+resettest(G2model13, power=2:3, type="fitted")
+coeftest(G2model13, vcov.=vcovHAC(G2model13))
+
+linearHypothesis(model13, c("Mkt.RF:SMB","I(Mkt.RF^3)","Mkt.RF:HML"), vcov.=vcovHAC(model13))
+G3model13 = lm(SMALL.LoBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) + I(SMB^3) + HML + I(HML^2)+ I(HML^3) + SMB:HML, data=Dane3FF)
+#rest 
+resettest(G3model13, power=2:3, type="fitted")
+coeftest(G3model13, vcov.=vcovHAC(G3model13))
+
+linearHypothesis(model13, c("Mkt.RF:SMB","I(Mkt.RF^3)","Mkt.RF:HML","I(SMB^2)"), vcov.=vcovHAC(model13))
+G4model13 = lm(SMALL.LoBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^3) + HML + I(HML^2)+ I(HML^3) + SMB:HML, data=Dane3FF)
+#rest 
+resettest(G4model13, power=2:3, type="fitted")
+coeftest(G4model13, vcov.=vcovHAC(G4model13))
+
+linearHypothesis(model13, c("Mkt.RF:SMB","I(Mkt.RF^3)","Mkt.RF:HML","I(SMB^2)", "I(HML^2)"), vcov.=vcovHAC(model13))
+G5model13 = lm(SMALL.LoBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^3) + HML + I(HML^3) + SMB:HML, data=Dane3FF)
+#rest NIE PRZECHODZI wiec bierzemy poprzedni
+resettest(G5model13, power=2:3, type="fitted")
+coeftest(G5model13, vcov.=vcovHAC(G5model13))
+
+linearHypothesis(model13, c("Mkt.RF:SMB","I(Mkt.RF^3)","Mkt.RF:HML","I(SMB^2)", "I(HML^2)","SMB:HML"), vcov.=vcovHAC(model13))
+G6model13 = lm(SMALL.LoBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^3) + HML + I(HML^3), data=Dane3FF)
+#rest NIE PRZECHODZI wiec bierzemy poprzedni
+resettest(G6model13, power=2:3, type="fitted")
+coeftest(G6model13, vcov.=vcovHAC(G6model13))
+
+linearHypothesis(model13, c("Mkt.RF:SMB","I(Mkt.RF^3)","Mkt.RF:HML","I(SMB^2)", "I(HML^2)","SMB:HML","I(HML^3)"), vcov.=vcovHAC(model13))
+G7model13 = lm(SMALL.LoBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^3) + HML, data=Dane3FF)
+#rest NIE PRZECHODZI wiec bierzemy poprzedni
+resettest(G7model13, power=2:3, type="fitted")
+coeftest(G7model13, vcov.=vcovHAC(G7model13))
+
+linearHypothesis(model13, c("Mkt.RF:SMB","I(Mkt.RF^3)","Mkt.RF:HML","I(SMB^2)", "I(HML^2)","SMB:HML","I(HML^3)","I(Mkt.RF^2)"), vcov.=vcovHAC(model13))
+G8model13 = lm(SMALL.LoBM ~ Mkt.RF + SMB + I(SMB^3) + HML, data=Dane3FF)
+#rest NIE PRZECHODZI wiec bierzemy poprzedni
+resettest(G8model13, power=2:3, type="fitted")
+coeftest(G8model13, vcov.=vcovHAC(G8model13))
+
+Coef.Small.LoBM = data.frame()
+Stats.Small.LoBM = data.frame()
+Coef.Small.LoBM<-t(as.data.frame(rbind(coeftest(G8model13, vcov.=vcovHAC(G8model13))[,1],
+                     coeftest(G8model13, vcov.=vcovHAC(G8model13))[,4])))
+
+#p-v ^2=0
+#zmienna nieistotna
+Stats.Small.LoBM<-rbind(Stats.Small.LoBM,-1)
+#p-v ^3=0
+#zmienna nieistotna
+Stats.Small.LoBM<-rbind(Stats.Small.LoBM,linearHypothesis(G8model13, "I(SMB^3)")["Pr(>F)"][2,])
+#p-v inter=0
+#zmienne łącznie istotne
+Stats.Small.LoBM<-rbind(Stats.Small.LoBM,-1)
+#p-v ^2=0 i ^3=0
+#brak kwadratow
+Stats.Small.LoBM<-rbind(Stats.Small.LoBM,-1)
+#p-v ^2=0 i ^3=0 i inter=0
+#nie ma kwadratow
+Stats.Small.LoBM<-rbind(Stats.Small.LoBM,-1)
+#rest fit
+Stats.Small.LoBM<-rbind(Stats.Small.LoBM,resettest(G8model13, power=2:3, type="fitted")$p.value)
+#rest reg (rhs)
+Stats.Small.LoBM<-rbind(Stats.Small.LoBM,resettest(G8model13, power=2:3, type="regressor")$p.value)
+#Breusch-Godfrey
+Stats.Small.LoBM<-rbind(Stats.Small.LoBM,bgtest(G8model13, order = 1)$p.value)
+#R^2
+Stats.Small.LoBM<-rbind(Stats.Small.LoBM,summary(G8model13)$r.squared)
+#Adjusted R^2
+Stats.Small.LoBM<-rbind(Stats.Small.LoBM,summary(G8model13)$adj.r.squared)
+#AIC
+Stats.Small.LoBM<-rbind(Stats.Small.LoBM,AIC(G8model13))
+#SIC
+Stats.Small.LoBM<-rbind(Stats.Small.LoBM,BIC(G8model13))
+#N
+Stats.Small.LoBM<-rbind(Stats.Small.LoBM,summary(G8model13)$df[1]+summary(G8model13)$df[2])
+
+write.xlsx(Coef.Small.LoBM,"Small.LoBM.xlsx", sheetName="Coef")
+write.xlsx(Stats.Small.LoBM,"Small.LoBM.xlsx", sheetName="Stats", append=TRUE)
+```
+## ME1.BM2
+```{r}
+#Bardzo slaby rest
+model22 = lm(ME1.BM2 ~ Mkt.RF + I(Mkt.RF^2) + I(Mkt.RF^3) + SMB + I(SMB^2) + I(SMB^3) + HML + I(HML^2)+ I(HML^3) + Mkt.RF:SMB + Mkt.RF:HML + SMB:HML, data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+resettest(model22, power=2:3, type="fitted")
+coeftest(model22, vcov.=vcovHAC(model22))
+#GETS----
+linearHypothesis(model22, c("Mkt.RF:HML"), vcov.=vcovHAC(model22))
+G1model22 = lm(ME1.BM2 ~ Mkt.RF + I(Mkt.RF^2) + I(Mkt.RF^3) + SMB + I(SMB^2) + I(SMB^3) + HML + I(HML^2)+ I(HML^3) + Mkt.RF:SMB + SMB:HML, data=Dane3FF)
+#forma funkcyjna
+resettest(G1model22, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(G1model22, vcov.=vcovHAC(G1model22))
+
+linearHypothesis(model22, c("Mkt.RF:HML", "SMB:HML"), vcov.=vcovHAC(model22))
+G2model22 = lm(ME1.BM2 ~ Mkt.RF + I(Mkt.RF^2) + I(Mkt.RF^3) + SMB + I(SMB^2) + I(SMB^3) + HML + I(HML^2)+ I(HML^3) + Mkt.RF:SMB, data=Dane3FF)
+resettest(G2model22, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(G2model22, vcov.=vcovHAC(G2model22))
+
+linearHypothesis(model22, c("Mkt.RF:HML", "SMB:HML", "I(SMB^2)"), vcov.=vcovHAC(model22))
+G3model22 = lm(ME1.BM2 ~ Mkt.RF + I(Mkt.RF^2) + I(Mkt.RF^3) + SMB + I(SMB^3) + HML + I(HML^2)+ I(HML^3) + Mkt.RF:SMB, data=Dane3FF)
+#forma funkcyjna
+resettest(G3model22, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(G3model22, vcov.=vcovHAC(G3model22))
+
+linearHypothesis(model22, c("Mkt.RF:HML", "SMB:HML", "I(SMB^2)", "I(HML^2)"), vcov.=vcovHAC(model22))
+G4model22 = lm(ME1.BM2 ~ Mkt.RF + I(Mkt.RF^2) + I(Mkt.RF^3) + SMB + I(SMB^3) + HML + I(HML^3) + Mkt.RF:SMB, data=Dane3FF)
+#forma funkcyjna
+resettest(G4model22, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(G4model22, vcov.=vcovHAC(G4model22))
+
+linearHypothesis(model22, c("Mkt.RF:HML", "SMB:HML", "I(SMB^2)", "I(HML^2)", "I(Mkt.RF^3)"), vcov.=vcovHAC(model22))
+G5model22 = lm(ME1.BM2 ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^3) + HML + I(HML^3) + Mkt.RF:SMB, data=Dane3FF)
+#forma funkcyjna
+resettest(G5model22, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(G5model22, vcov.=vcovHAC(G5model22))
+
+linearHypothesis(model22, c("Mkt.RF:HML", "SMB:HML", "I(SMB^2)", "I(HML^2)", "I(Mkt.RF^3)", "Mkt.RF:SMB"), vcov.=vcovHAC(model22))
+G6model22 = lm(ME1.BM2 ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^3) + HML + I(HML^3), data=Dane3FF)
+#forma funkcyjna
+resettest(G6model22, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(G6model22, vcov.=vcovHAC(G6model22))
+
+Coef.ME1.BM2 = data.frame()
+Stats.ME1.BM2= data.frame()
+Coef.ME1.BM2<-t(as.data.frame(rbind(coeftest(G6model22, vcov.=vcovHAC(G6model22))[,1],
+                     coeftest(G6model22, vcov.=vcovHAC(G6model22))[,4])))
+
+#p-v ^2=0
+#zmienna istotna
+Stats.ME1.BM2<-rbind(Stats.ME1.BM2,linearHypothesis(G6model22, "I(Mkt.RF^2)")["Pr(>F)"][2,])
+#p-v ^3=0
+#zmienna istotna
+Stats.ME1.BM2<-rbind(Stats.ME1.BM2,linearHypothesis(G6model22, c("I(SMB^3)","I(HML^3)"))["Pr(>F)"][2,])
+#p-v inter=0
+#zmienna istotna
+Stats.ME1.BM2<-rbind(Stats.ME1.BM2,-1)
+#p-v ^2=0 i ^3=0
+#zmienne łącznie istotne
+Stats.ME1.BM2<-rbind(Stats.ME1.BM2,linearHypothesis(G6model22, c("I(Mkt.RF^2)",
+                                                                 "I(SMB^3)","I(HML^3)"))["Pr(>F)"][2,])
+#p-v ^2=0 i ^3=0 i inter=0
+#zmienne łącznie istotne
+Stats.ME1.BM2<-rbind(Stats.ME1.BM2,-1)
+#rest fit
+Stats.ME1.BM2<-rbind(Stats.ME1.BM2,resettest(G6model22, power=2:3, type="fitted")$p.value)
+#rest reg (rhs)
+Stats.ME1.BM2<-rbind(Stats.ME1.BM2,resettest(G6model22, power=2:3, type="regressor")$p.value)
+#Breusch-Godfrey
+Stats.ME1.BM2<-rbind(Stats.ME1.BM2,bgtest(G6model22, order = 1)$p.value)
+#R^2
+Stats.ME1.BM2<-rbind(Stats.ME1.BM2,summary(G6model22)$r.squared)
+#Adjusted R^2
+Stats.ME1.BM2<-rbind(Stats.ME1.BM2,summary(G6model22)$adj.r.squared)
+#AIC
+Stats.ME1.BM2<-rbind(Stats.ME1.BM2,AIC(G6model22))
+#SIC
+Stats.ME1.BM2<-rbind(Stats.ME1.BM2,BIC(G6model22))
+#N
+Stats.ME1.BM2<-rbind(Stats.ME1.BM2,summary(G6model22)$df[1]+summary(G6model22)$df[2])
+
+write.xlsx(Coef.ME1.BM2,"ME1.BM2.xlsx", sheetName="Coef")
+write.xlsx(Stats.ME1.BM2,"ME1.BM2.xlsx", sheetName="Stats", append=TRUE)
+```
+
+## Small.HiBM
+```{r}
+#Bardzo slaby rest
+model32 = lm(SMALL.HiBM ~ Mkt.RF + I(Mkt.RF^2) + I(Mkt.RF^3) + SMB + I(SMB^2) + I(SMB^3) + HML + I(HML^2)+ I(HML^3) + Mkt.RF:SMB + Mkt.RF:HML + SMB:HML, data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+resettest(model32, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(model32, vcov.=vcovHAC(model32))
+
+#GETS----
+linearHypothesis(model32, c("Mkt.RF:SMB"), vcov.=vcovHAC(model32))
+G1model32 = lm(SMALL.HiBM ~ Mkt.RF + I(Mkt.RF^2) + I(Mkt.RF^3) + SMB + I(SMB^2) + I(SMB^3) + HML + I(HML^2)+ I(HML^3) + Mkt.RF:HML + SMB:HML, data=Dane3FF)
+#forma funkcyjna
+resettest(G1model32, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(G1model32, vcov.=vcovHAC(G1model32))
+
+linearHypothesis(model32, c("I(Mkt.RF^3)", "Mkt.RF:SMB"), vcov.=vcovHAC(model32))
+G2model32 = lm(SMALL.HiBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) + I(SMB^3) + HML + I(HML^2)+ I(HML^3) + Mkt.RF:HML + SMB:HML, data=Dane3FF)
+#nie przechodzi RESET
+resettest(G2model32, power=2:3, type="fitted")
+coeftest(G2model32, vcov.=vcovHAC(G2model32))
+
+linearHypothesis(model32, c("I(Mkt.RF^3)", "Mkt.RF:SMB", "SMB:HML"), vcov.=vcovHAC(model32))
+G3model32 = lm(SMALL.HiBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) + I(SMB^3) + HML + I(HML^2)+ I(HML^3) + Mkt.RF:HML, data=Dane3FF)
+#forma funkcyjna
+resettest(G3model32, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(G3model32, vcov.=vcovHAC(G3model32))
+
+linearHypothesis(model32, c("I(Mkt.RF^3)", "Mkt.RF:SMB", "SMB:HML", "Mkt.RF:HML"), vcov.=vcovHAC(model32))
+G3model32 = lm(SMALL.HiBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) + I(SMB^3) + HML + I(HML^2)+ I(HML^3), data=Dane3FF)
+#forma funkcyjna
+resettest(G3model32, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(G3model32, vcov.=vcovHAC(G3model32))
+
+linearHypothesis(model32, c("I(Mkt.RF^3)", "Mkt.RF:SMB", "SMB:HML", "Mkt.RF:HML", "I(HML^3)"), vcov.=vcovHAC(model32))
+G4model32 = lm(SMALL.HiBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) + I(SMB^3) + HML + I(HML^2), data=Dane3FF)
+#forma funkcyjna
+resettest(G4model32, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(G4model32, vcov.=vcovHAC(G4model32))
+
+linearHypothesis(model32, c("I(Mkt.RF^3)", "Mkt.RF:SMB", "SMB:HML", "Mkt.RF:HML", "I(HML^3)", "I(Mkt.RF^2)"), vcov.=vcovHAC(model32))
+G5model32 = lm(SMALL.HiBM ~ Mkt.RF + SMB + I(SMB^2) + I(SMB^3) + HML + I(HML^2), data=Dane3FF)
+#forma funkcyjna
+resettest(G5model32, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(G5model32, vcov.=vcovHAC(G5model32))
+
+linearHypothesis(model32, c("I(Mkt.RF^3)", "Mkt.RF:SMB", "SMB:HML", "Mkt.RF:HML", "I(HML^3)", "I(Mkt.RF^2)","I(HML^2)"), vcov.=vcovHAC(model32))
+G6model32 = lm(SMALL.HiBM ~ Mkt.RF + SMB + I(SMB^2) + I(SMB^3) + HML, data=Dane3FF)
+#forma funkcyjna
+resettest(G6model32, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(G6model32, vcov.=vcovHAC(G6model32))
+
+Coef.SMALL.HiBM = data.frame()
+Stats.SMALL.HiBM= data.frame()
+Coef.SMALL.HiBM<-t(as.data.frame(rbind(coeftest(G6model32, vcov.=vcovHAC(G6model32))[,1],
+                     coeftest(G6model32, vcov.=vcovHAC(G6model32))[,4])))
+
+#p-v ^2=0
+# nie ma kwadratow
+Stats.SMALL.HiBM<-rbind(Stats.SMALL.HiBM,linearHypothesis(G6model32, "I(SMB^2)=0")["Pr(>F)"][2,])
+#p-v ^3=0
+#zmienna istotna
+Stats.SMALL.HiBM<-rbind(Stats.SMALL.HiBM,linearHypothesis(G6model32, "I(SMB^3)=0")["Pr(>F)"][2,])
+#p-v inter=0
+#zmienne łącznie istotna
+Stats.SMALL.HiBM<-rbind(Stats.SMALL.HiBM,-1)
+#p-v ^2=0 i ^3=0
+#nie ma kwadratow
+Stats.SMALL.HiBM<-rbind(Stats.SMALL.HiBM,-1)
+#p-v ^2=0 i ^3=0 i inter=0
+#zmienne łącznie istotne, nie ma kwadratow
+Stats.SMALL.HiBM<-rbind(Stats.SMALL.HiBM,linearHypothesis(G6model32,
+                                                          c("I(SMB^2)=0","I(SMB^3)=0"))["Pr(>F)"][2,])
+#rest fit
+Stats.SMALL.HiBM<-rbind(Stats.SMALL.HiBM,resettest(G6model32, power=2:3, type="fitted")$p.value)
+#rest reg (rhs)
+Stats.SMALL.HiBM<-rbind(Stats.SMALL.HiBM,resettest(G6model32, power=2:3, type="regressor")$p.value)
+#Breusch-Godfrey
+Stats.SMALL.HiBM<-rbind(Stats.SMALL.HiBM,bgtest(G6model32, order = 1)$p.value)
+#R^2
+Stats.SMALL.HiBM<-rbind(Stats.SMALL.HiBM,summary(G6model32)$r.squared)
+#Adjusted R^2
+Stats.SMALL.HiBM<-rbind(Stats.SMALL.HiBM,summary(G6model32)$adj.r.squared)
+#AIC
+Stats.SMALL.HiBM<-rbind(Stats.SMALL.HiBM,AIC(G6model32))
+#SIC
+Stats.SMALL.HiBM<-rbind(Stats.SMALL.HiBM,BIC(G6model32))
+#N
+Stats.SMALL.HiBM<-rbind(Stats.SMALL.HiBM,summary(G6model32)$df[1]+summary(G6model32)$df[2])
+
+write.xlsx(Coef.SMALL.HiBM,"SMALL.HiBM.xlsx", sheetName="Coef")
+write.xlsx(Stats.SMALL.HiBM,"SMALL.HiBM.xlsx", sheetName="Stats", append=TRUE)
+```
+
+## Big.LoBM
+```{r eval=FALSE}
+model41 = lm(BIG.LoBM ~ Mkt.RF + I(Mkt.RF^2) + I(Mkt.RF^3) + SMB + I(SMB^2) + I(SMB^3) + HML + I(HML^2)+ I(HML^3) + Mkt.RF:SMB + Mkt.RF:HML + SMB:HML, data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+resettest(model41, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(model41, vcov.=vcovHAC(model41))
+
+#GETS
+#lacznie nieistotne
+linearHypothesis(model41, c("SMB:HML"), vcov.=vcovHAC(model41))
+G1model41 = lm(BIG.LoBM ~ Mkt.RF + I(Mkt.RF^2) + I(Mkt.RF^3) + SMB + I(SMB^2) + I(SMB^3) + HML + I(HML^2)+ I(HML^3) + Mkt.RF:SMB + Mkt.RF:HML, data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+resettest(G1model41, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(G1model41, vcov.=vcovHAC(G1model41))
+
+linearHypothesis(model41, c("SMB:HML", "I(Mkt.RF^3)"), vcov.=vcovHAC(model41))
+G2model41 = lm(BIG.LoBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) + I(SMB^3) + HML + I(HML^2)+ I(HML^3) + Mkt.RF:SMB + Mkt.RF:HML, data=Dane3FF)
+#forma funkcyjna
+resettest(G2model41, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(G2model41, vcov.=vcovHAC(G2model41))
+
+linearHypothesis(model41, c("SMB:HML", "I(Mkt.RF^3)", "Mkt.RF:SMB"), vcov.=vcovHAC(model41))
+G3model41 = lm(BIG.LoBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) + I(SMB^3) + HML + I(HML^2)+ I(HML^3)  + Mkt.RF:HML, data=Dane3FF)
+#forma funkcyjna
+resettest(G3model41, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(G3model41, vcov.=vcovHAC(G3model41))
+
+linearHypothesis(model41, c("SMB:HML", "I(Mkt.RF^3)", "Mkt.RF:SMB", "I(Mkt.RF^2)"), vcov.=vcovHAC(model41))
+G4model41 = lm(BIG.LoBM ~ Mkt.RF + SMB + I(SMB^2) + I(SMB^3) + HML + I(HML^2)+ I(HML^3)  + Mkt.RF:HML, data=Dane3FF)
+#forma funkcyjna
+resettest(G4model41, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(G4model41, vcov.=vcovHAC(G4model41))
+
+linearHypothesis(model41, c("SMB:HML", "I(Mkt.RF^3)", "Mkt.RF:SMB", "I(Mkt.RF^2)","Mkt.RF:HML"), vcov.=vcovHAC(model41))
+G5model41 = lm(BIG.LoBM ~ Mkt.RF + SMB + I(SMB^2) + I(SMB^3) + HML + I(HML^2)+ I(HML^3), data=Dane3FF)
+#forma funkcyjna
+resettest(G5model41, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(G5model41, vcov.=vcovHAC(G5model41))
+
+linearHypothesis(model41, c("SMB:HML", "I(Mkt.RF^3)", "Mkt.RF:SMB", "I(Mkt.RF^2)","Mkt.RF:HML","I(HML^3)","I(SMB^2)"), vcov.=vcovHAC(model41))
+G7model41 = lm(BIG.LoBM ~ Mkt.RF + SMB + I(SMB^3) + HML + I(HML^2), data=Dane3FF)
+#forma funkcyjna
+resettest(G7model41, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(G7model41, vcov.=vcovHAC(G7model41))
+
+linearHypothesis(model41, c("SMB:HML", "I(Mkt.RF^3)", "Mkt.RF:SMB", "I(Mkt.RF^2)","Mkt.RF:HML","I(HML^3)","I(SMB^2)","I(SMB^3)"), vcov.=vcovHAC(model41))
+G8model41 = lm(BIG.LoBM ~ Mkt.RF + SMB + HML + I(HML^2), data=Dane3FF)
+#forma funkcyjna
+resettest(G8model41, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(G8model41, vcov.=vcovHAC(G8model41))
+
+
+Coef.BIG.LoBM = data.frame()
+Stats.BIG.LoBM= data.frame()
+Coef.BIG.LoBM<-t(as.data.frame(rbind(coeftest(G8model41, vcov.=vcovHAC(G8model41))[,1],
+                     coeftest(G8model41, vcov.=vcovHAC(G8model41))[,4])))
+
+#p-v ^2=0
+#zmienne łącznie istotne
+Stats.BIG.LoBM<-rbind(Stats.BIG.LoBM,linearHypothesis(G8model41, "I(HML^2)=0")["Pr(>F)"][2,])
+#p-v ^3=0
+#zmienne łącznie istotne
+Stats.BIG.LoBM<-rbind(Stats.BIG.LoBM,-1)
+#p-v inter=0
+#zmienne łącznie istotne
+Stats.BIG.LoBM<-rbind(Stats.BIG.LoBM,-1)
+#p-v ^2=0 i ^3=0
+#zmienne łącznie istotne
+Stats.BIG.LoBM<-rbind(Stats.BIG.LoBM,-1)
+#p-v ^2=0 i ^3=0 i inter=0
+#zmienne łącznie istotne
+Stats.BIG.LoBM<-rbind(Stats.BIG.LoBM,-1)
+#rest fit
+Stats.BIG.LoBM<-rbind(Stats.BIG.LoBM,resettest(G8model41, power=2:3, type="fitted")$p.value)
+#rest reg (rhs)
+Stats.BIG.LoBM<-rbind(Stats.BIG.LoBM,resettest(G8model41, power=2:3, type="regressor")$p.value)
+#Breusch-Godfrey
+Stats.BIG.LoBM<-rbind(Stats.BIG.LoBM,bgtest(G8model41, order = 1)$p.value)
+#R^2
+Stats.BIG.LoBM<-rbind(Stats.BIG.LoBM,summary(G8model41)$r.squared)
+#Adjusted R^2
+Stats.BIG.LoBM<-rbind(Stats.BIG.LoBM,summary(G8model41)$adj.r.squared)
+#AIC
+Stats.BIG.LoBM<-rbind(Stats.BIG.LoBM,AIC(G8model41))
+#SIC
+Stats.BIG.LoBM<-rbind(Stats.BIG.LoBM,BIC(G8model41))
+#N
+Stats.BIG.LoBM<-rbind(Stats.BIG.LoBM,summary(G8model41)$df[1]+summary(G8model41)$df[2])
+
+write.xlsx(Coef.BIG.LoBM,"BIG.LoBM.xlsx", sheetName="Coef")
+write.xlsx(Stats.BIG.LoBM,"BIG.LoBM.xlsx", sheetName="Stats", append=TRUE)
+```
+
+## ME2.BM2
+```{r}
+#Trzeba odrzucic duzo zeby przeszlo RESET
+model52 = lm(ME2.BM2 ~ Mkt.RF + I(Mkt.RF^2) + I(Mkt.RF^3) + SMB + I(SMB^2) + I(SMB^3) + HML + I(HML^2)+ I(HML^3) + Mkt.RF:SMB + Mkt.RF:HML + SMB:HML, data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+resettest(model52, power=2:3, type="fitted")
+coeftest(model52, vcov.=vcovHAC(model52))
+
+#GETS
+linearHypothesis(model52, c("I(SMB^2)"), vcov.=vcovHAC(model52))
+G1model52 = lm(ME2.BM2 ~ Mkt.RF + I(Mkt.RF^2) + I(Mkt.RF^3) + SMB + I(SMB^3) + HML + I(HML^2)+ I(HML^3) + Mkt.RF:SMB + Mkt.RF:HML + SMB:HML, data=Dane3FF)
+resettest(G1model52, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(G1model52, vcov.=vcovHAC(G1model52))
+
+linearHypothesis(model52, c("I(SMB^2)", "Mkt.RF:SMB"), vcov.=vcovHAC(model52))
+G2model52 = lm(ME2.BM2 ~ Mkt.RF + I(Mkt.RF^2) + I(Mkt.RF^3) + SMB + I(SMB^3) + HML + I(HML^2)+ I(HML^3) + Mkt.RF:HML + SMB:HML, data=Dane3FF)
+#forma funkcyjna
+resettest(G2model52, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(G2model52, vcov.=vcovHAC(G2model52))
+
+linearHypothesis(model52, c("I(SMB^2)", "Mkt.RF:SMB", "I(Mkt.RF^3)"), vcov.=vcovHAC(model52))
+G3model52 = lm(ME2.BM2 ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^3) + HML + I(HML^2)+ I(HML^3) + Mkt.RF:HML + SMB:HML, data=Dane3FF)
+#forma funkcyjna
+resettest(G3model52, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(G3model52, vcov.=vcovHAC(G3model52))
+
+linearHypothesis(model52, c("I(SMB^2)", "Mkt.RF:SMB", "I(Mkt.RF^3)","I(HML^3)"), vcov.=vcovHAC(model52))
+G4model52 = lm(ME2.BM2 ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^3) + HML + I(HML^2) + Mkt.RF:HML + SMB:HML, data=Dane3FF)
+#forma funkcyjna
+resettest(G4model52, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(G4model52, vcov.=vcovHAC(G4model52))
+
+linearHypothesis(model52, c("I(SMB^2)", "Mkt.RF:SMB", "I(Mkt.RF^3)","I(HML^3)","SMB:HML"), vcov.=vcovHAC(model52))
+G5model52 = lm(ME2.BM2 ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^3) + HML + I(HML^2) + Mkt.RF:HML, data=Dane3FF)
+#forma funkcyjna
+resettest(G5model52, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(G5model52, vcov.=vcovHAC(G5model52))
+
+linearHypothesis(model52, c("I(SMB^2)", "Mkt.RF:SMB", "I(Mkt.RF^3)","I(HML^3)","SMB:HML","I(Mkt.RF^2)"), vcov.=vcovHAC(model52))
+G6model52 = lm(ME2.BM2 ~ Mkt.RF + SMB + I(SMB^3) + HML + I(HML^2) + Mkt.RF:HML, data=Dane3FF)
+#forma funkcyjna
+resettest(G6model52, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(G6model52, vcov.=vcovHAC(G6model52))
+
+Coef.ME2.BM2 = data.frame()
+Stats.ME2.BM2= data.frame()
+Coef.ME2.BM2<-t(as.data.frame(rbind(coeftest(G6model52, vcov.=vcovHAC(G6model52))[,1],
+                     coeftest(G6model52, vcov.=vcovHAC(G6model52))[,4])))
+
+#p-v ^2=0
+#nie ma kwadratów
+Stats.ME2.BM2<-rbind(Stats.ME2.BM2,linearHypothesis(G6model52, "I(HML^2)")["Pr(>F)"][2,])
+#p-v ^3=0
+#zmienne łącznie istotne
+Stats.ME2.BM2<-rbind(Stats.ME2.BM2,linearHypothesis(G6model52, "I(SMB^3)")["Pr(>F)"][2,])
+#p-v inter=0
+#nie ma interakcji
+Stats.ME2.BM2<-rbind(Stats.ME2.BM2,linearHypothesis(G6model52, "Mkt.RF:HML")["Pr(>F)"][2,])
+#p-v ^2=0 i ^3=0
+#nie ma kwadratow
+Stats.ME2.BM2<-rbind(Stats.ME2.BM2,linearHypothesis(G6model52, c("I(HML^2)","I(SMB^3)"))["Pr(>F)"][2,])
+#p-v ^2=0 i ^3=0 i inter=0
+#nie ma interakcji i kwadratow
+Stats.ME2.BM2<-rbind(Stats.ME2.BM2,linearHypothesis(G6model52, c("I(HML^2)",
+                                                                 "I(SMB^3)","Mkt.RF:HML"))["Pr(>F)"][2,])
+#rest fit
+Stats.ME2.BM2<-rbind(Stats.ME2.BM2,resettest(G6model52, power=2:3, type="fitted")$p.value)
+#rest reg (rhs)
+Stats.ME2.BM2<-rbind(Stats.ME2.BM2,resettest(G6model52, power=2:3, type="regressor")$p.value)
+#Breusch-Godfrey
+Stats.ME2.BM2<-rbind(Stats.ME2.BM2,bgtest(G6model52, order = 1)$p.value)
+#R^2
+Stats.ME2.BM2<-rbind(Stats.ME2.BM2,summary(G6model52)$r.squared)
+#Adjusted R^2
+Stats.ME2.BM2<-rbind(Stats.ME2.BM2,summary(G6model52)$adj.r.squared)
+#AIC
+Stats.ME2.BM2<-rbind(Stats.ME2.BM2,AIC(G6model52))
+#SIC
+Stats.ME2.BM2<-rbind(Stats.ME2.BM2,BIC(G6model52))
+#N
+Stats.ME2.BM2<-rbind(Stats.ME2.BM2,summary(G6model52)$df[1]+summary(G6model52)$df[2])
+
+write.xlsx(Coef.ME2.BM2,"ME2.BM2.xlsx", sheetName="Coef")
+write.xlsx(Stats.ME2.BM2,"ME2.BM2.xlsx", sheetName="Stats", append=TRUE)
+```
+
+## Big.HiBM
+```{r}
+#Odrzucamy HML^3 zeby przeszlo RESET
+model62 = lm(BIG.HiBM ~ Mkt.RF + I(Mkt.RF^2) + I(Mkt.RF^3) + SMB + I(SMB^2) + I(SMB^3) + HML + I(HML^2)+ I(HML^3) + Mkt.RF:SMB + Mkt.RF:HML + SMB:HML, data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+resettest(model62, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(model62, vcov.=vcovHAC(model62))
+
+#GETS
+linearHypothesis(model62, c("I(SMB^2)"), vcov.=vcovHAC(model62))
+G1model62 = lm(BIG.HiBM ~ Mkt.RF + I(Mkt.RF^2) + I(Mkt.RF^3) + SMB + I(SMB^3) + HML + I(HML^2)+ I(HML^3) + Mkt.RF:SMB + Mkt.RF:HML + SMB:HML, data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+resettest(G1model62, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(G1model62, vcov.=vcovHAC(G1model62))
+
+linearHypothesis(model62, c("I(SMB^2)","Mkt.RF:HML"), vcov.=vcovHAC(model62))
+G2model62 = lm(BIG.HiBM ~ Mkt.RF + I(Mkt.RF^2) + I(Mkt.RF^3) + SMB + I(SMB^3) + HML + I(HML^2)+ I(HML^3) + Mkt.RF:SMB + SMB:HML, data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+resettest(G2model62, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(G2model62, vcov.=vcovHAC(G2model62))
+
+linearHypothesis(model62, c("I(SMB^2)","Mkt.RF:HML","Mkt.RF:SMB"), vcov.=vcovHAC(model62))
+G3model62 = lm(BIG.HiBM ~ Mkt.RF + I(Mkt.RF^2) + I(Mkt.RF^3) + SMB + I(SMB^3) + HML + I(HML^2)+ I(HML^3) + SMB:HML, data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+resettest(G3model62, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(G3model62, vcov.=vcovHAC(G3model62))
+
+linearHypothesis(model62, c("I(SMB^2)","Mkt.RF:HML","Mkt.RF:SMB","I(Mkt.RF^3)"), vcov.=vcovHAC(model62))
+G4model62 = lm(BIG.HiBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^3) + HML + I(HML^2)+ I(HML^3) + SMB:HML, data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+resettest(G4model62, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(G4model62, vcov.=vcovHAC(G4model62))
+
+linearHypothesis(model62, c("I(SMB^2)","Mkt.RF:HML","Mkt.RF:SMB","I(Mkt.RF^3)","I(HML^2)"), vcov.=vcovHAC(model62))
+G5model62 = lm(BIG.HiBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^3) + HML + I(HML^3) + SMB:HML, data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+resettest(G5model62, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(G5model62, vcov.=vcovHAC(G5model62))
+
+linearHypothesis(model62, c("I(SMB^2)","Mkt.RF:HML","Mkt.RF:SMB","I(Mkt.RF^3)","I(HML^2)","SMB:HML"), vcov.=vcovHAC(model62))
+G6model62 = lm(BIG.HiBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^3) + HML + I(HML^3), data=Dane3FF)
+#forma funkcyjna
+resettest(G6model62, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(G6model62, vcov.=vcovHAC(G6model62))
+
+linearHypothesis(model62, c("I(SMB^2)","Mkt.RF:HML","Mkt.RF:SMB","I(Mkt.RF^3)","I(HML^2)","SMB:HML","I(HML^3)"), vcov.=vcovHAC(model62))
+G7model62 = lm(BIG.HiBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^3) + HML, data=Dane3FF)
+#forma funkcyjna
+resettest(G7model62, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(G7model62, vcov.=vcovHAC(G7model62))
+
+linearHypothesis(model62, c("I(SMB^2)","Mkt.RF:HML","Mkt.RF:SMB","I(Mkt.RF^3)","I(HML^2)","SMB:HML","I(HML^3)","I(Mkt.RF^2)"), vcov.=vcovHAC(model62))
+G8model62 = lm(BIG.HiBM ~ Mkt.RF + SMB + I(SMB^3) + HML, data=Dane3FF)
+#forma funkcyjna
+resettest(G8model62, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(G8model62, vcov.=vcovHAC(G8model62))
+
+Coef.BIG.HiBM = data.frame()
+Stats.BIG.HiBM= data.frame()
+Coef.BIG.HiBM<-t(as.data.frame(rbind(coeftest(G8model62, vcov.=vcovHAC(G8model62))[,1],
+                     coeftest(G8model62, vcov.=vcovHAC(G8model62))[,4])))
+
+#p-v ^2=0
+#zmienne łącznie istotne
+Stats.BIG.HiBM<-rbind(Stats.BIG.HiBM,-1)
+#p-v ^3=0
+#nie ma szescianow
+Stats.BIG.HiBM<-rbind(Stats.BIG.HiBM,linearHypothesis(G8model62, "I(SMB^3)")["Pr(>F)"][2,])
+#p-v inter=0
+#zmienne łącznie istotne
+Stats.BIG.HiBM<-rbind(Stats.BIG.HiBM,-1)
+#p-v ^2=0 i ^3=0
+#nie ma szescianow
+Stats.BIG.HiBM<-rbind(Stats.BIG.HiBM,-1)
+#p-v ^2=0 i ^3=0 i inter=0
+#nie ma szescianow
+Stats.BIG.HiBM<-rbind(Stats.BIG.HiBM,-1)
+#rest fit
+Stats.BIG.HiBM<-rbind(Stats.BIG.HiBM,resettest(G8model62, power=2:3, type="fitted")$p.value)
+#rest reg (rhs)
+Stats.BIG.HiBM<-rbind(Stats.BIG.HiBM,resettest(G8model62, power=2:3, type="regressor")$p.value)
+#Breusch-Godfrey
+Stats.BIG.HiBM<-rbind(Stats.BIG.HiBM,bgtest(G8model62, order = 1)$p.value)
+#R^2
+Stats.BIG.HiBM<-rbind(Stats.BIG.HiBM,summary(G8model62)$r.squared)
+#Adjusted R^2
+Stats.BIG.HiBM<-rbind(Stats.BIG.HiBM,summary(G8model62)$adj.r.squared)
+#AIC
+Stats.BIG.HiBM<-rbind(Stats.BIG.HiBM,AIC(G8model62))
+#SIC
+Stats.BIG.HiBM<-rbind(Stats.BIG.HiBM,BIC(G8model62))
+#N
+Stats.BIG.HiBM<-rbind(Stats.BIG.HiBM,summary(G8model62)$df[1]+summary(G8model62)$df[2])
+
+write.xlsx(Coef.BIG.HiBM,"BIG.HiBM.xlsx", sheetName="Coef")
+write.xlsx(Stats.BIG.HiBM,"BIG.HiBM.xlsx", sheetName="Stats", append=TRUE)
+```
+
+## Model Liniowy
+## SMALL.LoBM
+```{r}
+#1) Portfel
+linear1 = lm(SMALL.LoBM ~ Mkt.RF + SMB + HML, data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+#NIE PRZECHODZI RESET
+resettest(linear1, power=2:3, type="fitted")
+coeftest(linear1, vcov.=vcovHAC(linear1))
+
+
+Coef = data.frame()
+Stats = data.frame()
+Coef<-t(as.data.frame(rbind(coeftest(linear1, vcov.=vcovHAC(linear1))[,1],
+                     coeftest(linear1, vcov.=vcovHAC(linear1))[,4])))
+
+
+#rest fit
+Stats<-rbind(Stats,resettest(linear1, power=2:3, type="fitted")$p.value)
+#rest reg (rhs)
+Stats<-rbind(Stats,resettest(linear1, power=2:3, type="regressor")$p.value)
+#Breusch-Godfrey
+Stats<-rbind(Stats,bgtest(linear1, order = 1)$p.value)
+#R^2
+Stats<-rbind(Stats,summary(linear1)$r.squared)
+#Adjusted R^2
+Stats<-rbind(Stats,summary(linear1)$adj.r.squared)
+#AIC
+Stats<-rbind(Stats,AIC(linear1))
+#SIC
+Stats<-rbind(Stats,BIC(linear1))
+#N
+Stats<-rbind(Stats,summary(linear1)$df[1]+summary(linear1)$df[2])
+
+write.xlsx(Coef,"linear_SMALL.LoBM.xlsx", sheetName="Coef")
+write.xlsx(Stats,"linear_SMALL.LoBM.xlsx", sheetName="Stats", append=TRUE)
+```
+## ME1.BM2 przechodzi reset
+```{r}
+#2) Portfel
+linear2 = lm(ME1.BM2 ~ Mkt.RF + SMB + HML, data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+#przechodzi reset
+resettest(linear2, power=2:3, type="fitted")
+coeftest(linear2, vcov.=vcovHAC(linear2))
+
+Coef = data.frame()
+Stats = data.frame()
+Coef<-t(as.data.frame(rbind(coeftest(linear2, vcov.=vcovHAC(linear2))[,1],
+                     coeftest(linear2, vcov.=vcovHAC(linear2))[,4])))
+
+#rest fit
+Stats<-rbind(Stats,resettest(linear2, power=2:3, type="fitted")$p.value)
+#rest reg (rhs)
+Stats<-rbind(Stats,resettest(linear2, power=2:3, type="regressor")$p.value)
+#Breusch-Godfrey
+Stats<-rbind(Stats,bgtest(linear2, order = 1)$p.value)
+#R^2
+Stats<-rbind(Stats,summary(linear2)$r.squared)
+#Adjusted R^2
+Stats<-rbind(Stats,summary(linear2)$adj.r.squared)
+#AIC
+Stats<-rbind(Stats,AIC(linear2))
+#SIC
+Stats<-rbind(Stats,BIC(linear2))
+#N
+Stats<-rbind(Stats,summary(linear2)$df[1]+summary(linear2)$df[2])
+
+write.xlsx(Coef,"linear_ME1.BM2.xlsx", sheetName="Coef")
+write.xlsx(Stats,"linear_ME1.BM2.xlsx", sheetName="Stats", append=TRUE)
+```
+## SMALL.HiBM
+```{r}
+#3) Portfel
+linear3 = lm(SMALL.HiBM ~ Mkt.RF + SMB + HML, data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+#NIE PRZECHODZI RESET
+resettest(linear3, power=2:3, type="fitted")
+coeftest(linear3, vcov.=vcovHAC(linear3))
+Coef = data.frame()
+Stats = data.frame()
+Coef<-t(as.data.frame(rbind(coeftest(linear3, vcov.=vcovHAC(linear3))[,1],
+                     coeftest(linear3, vcov.=vcovHAC(linear3))[,4])))
+
+#rest fit
+Stats<-rbind(Stats,resettest(linear3, power=2:3, type="fitted")$p.value)
+#rest reg (rhs)
+Stats<-rbind(Stats,resettest(linear3, power=2:3, type="regressor")$p.value)
+#Breusch-Godfrey
+Stats<-rbind(Stats,bgtest(linear3, order = 1)$p.value)
+#R^2
+Stats<-rbind(Stats,summary(linear3)$r.squared)
+#Adjusted R^2
+Stats<-rbind(Stats,summary(linear3)$adj.r.squared)
+#AIC
+Stats<-rbind(Stats,AIC(linear3))
+#SIC
+Stats<-rbind(Stats,BIC(linear3))
+#N
+Stats<-rbind(Stats,summary(linear3)$df[1]+summary(linear3)$df[2])
+
+write.xlsx(Coef,"linear_SMALL.HiBM.xlsx", sheetName="Coef")
+write.xlsx(Stats,"linear_SMALL.HiBM.xlsx", sheetName="Stats", append=TRUE)
+```
+## BIG.LoBM przechodzi reset
+```{r}
+#4) Portfel
+linear4 = lm(BIG.LoBM ~ Mkt.RF + SMB + HML, data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+#przechodzi reset
+resettest(linear4, power=2:3, type="fitted")
+#macierz odporna
+coeftest(linear4, vcov.=vcovHAC(linear4))
+
+Coef = data.frame()
+Stats = data.frame()
+Coef<-t(as.data.frame(rbind(coeftest(linear4, vcov.=vcovHAC(linear4))[,1],
+                     coeftest(linear4, vcov.=vcovHAC(linear4))[,4])))
+
+#rest fit
+Stats<-rbind(Stats,resettest(linear4, power=2:3, type="fitted")$p.value)
+#rest reg (rhs)
+Stats<-rbind(Stats,resettest(linear4, power=2:3, type="regressor")$p.value)
+#Breusch-Godfrey
+Stats<-rbind(Stats,bgtest(linear4, order = 1)$p.value)
+#R^2
+Stats<-rbind(Stats,summary(linear4)$r.squared)
+#Adjusted R^2
+Stats<-rbind(Stats,summary(linear4)$adj.r.squared)
+#AIC
+Stats<-rbind(Stats,AIC(linear4))
+#SIC
+Stats<-rbind(Stats,BIC(linear4))
+#N
+Stats<-rbind(Stats,summary(linear4)$df[1]+summary(linear4)$df[2])
+
+write.xlsx(Coef,"linear_BIG.LoBM.xlsx", sheetName="Coef")
+write.xlsx(Stats,"linear_BIG.LoBM.xlsx", sheetName="Stats", append=TRUE)
+```
+## ME2.BM2
+```{r}
+#5) Portfel
+linear5 = lm(ME2.BM2 ~ Mkt.RF + SMB + HML, data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+#NIE PRZECHODZI RESET
+resettest(linear5, power=2:3, type="fitted")
+coeftest(linear5, vcov.=vcovHAC(linear5))
+
+Coef = data.frame()
+Stats = data.frame()
+Coef<-t(as.data.frame(rbind(coeftest(linear5, vcov.=vcovHAC(linear5))[,1],
+                     coeftest(linear5, vcov.=vcovHAC(linear5))[,4])))
+
+#rest fit
+Stats<-rbind(Stats,resettest(linear5, power=2:3, type="fitted")$p.value)
+#rest reg (rhs)
+Stats<-rbind(Stats,resettest(linear5, power=2:3, type="regressor")$p.value)
+#Breusch-Godfrey
+Stats<-rbind(Stats,bgtest(linear5, order = 1)$p.value)
+#R^2
+Stats<-rbind(Stats,summary(linear5)$r.squared)
+#Adjusted R^2
+Stats<-rbind(Stats,summary(linear5)$adj.r.squared)
+#AIC
+Stats<-rbind(Stats,AIC(linear5))
+#SIC
+Stats<-rbind(Stats,BIC(linear5))
+#N
+Stats<-rbind(Stats,summary(linear5)$df[1]+summary(linear5)$df[2])
+
+write.xlsx(Coef,"linear_ME2.BM2.xlsx", sheetName="Coef")
+write.xlsx(Stats,"linear_ME2.BM2.xlsx", sheetName="Stats", append=TRUE)
+```
+## BIG.HiBM przechodzi reset
+```{r}
+#6) Portfel
+linear6 = lm(BIG.HiBM ~ Mkt.RF + SMB + HML, data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+#przechodzi reset
+resettest(linear6, power=2:3, type="fitted")
+coeftest(linear6, vcov.=vcovHAC(linear6))
+
+
+Coef = data.frame()
+Stats = data.frame()
+Coef<-t(as.data.frame(rbind(coeftest(linear6, vcov.=vcovHAC(linear6))[,1],
+                     coeftest(linear6, vcov.=vcovHAC(linear6))[,4])))
+
+#rest fit
+Stats<-rbind(Stats,resettest(linear6, power=2:3, type="fitted")$p.value)
+#rest reg (rhs)
+Stats<-rbind(Stats,resettest(linear6, power=2:3, type="regressor")$p.value)
+#Breusch-Godfrey
+Stats<-rbind(Stats,bgtest(linear6, order = 1)$p.value)
+#R^2
+Stats<-rbind(Stats,summary(linear6)$r.squared)
+#Adjusted R^2
+Stats<-rbind(Stats,summary(linear6)$adj.r.squared)
+#AIC
+Stats<-rbind(Stats,AIC(linear6))
+#SIC
+Stats<-rbind(Stats,BIC(linear6))
+#N
+Stats<-rbind(Stats,summary(linear6)$df[1]+summary(linear6)$df[2])
+
+write.xlsx(Coef,"linear_BIG.HiBM.xlsx", sheetName="Coef")
+write.xlsx(Stats,"linear_BIG.HiBM.xlsx", sheetName="Stats", append=TRUE)
+```
+
+## Model Liniowy z interakcjami
+## SMALL.LoBM przechodzi reset
+```{r}
+#1) Portfel
+linear_int1 = lm(SMALL.LoBM ~ Mkt.RF + SMB + HML+ Mkt.RF:SMB + Mkt.RF:HML + SMB:HML, data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+#NIE PRZECHODZI RESET
+resettest(linear_int1, power=2:3, type="fitted")
+coeftest(linear_int1, vcov.=vcovHAC(linear_int1))
+#GETS
+linearHypothesis(linear_int1, "Mkt.RF:SMB", vcov.=vcovHAC(linear_int1))
+G1linear_int1 = lm(SMALL.LoBM ~ Mkt.RF + SMB + HML + Mkt.RF:HML + SMB:HML, data=Dane3FF)
+resettest(G1linear_int1, power=2:3, type="fitted")
+coeftest(G1linear_int1, vcov.=vcovHAC(G1linear_int1))
+
+linearHypothesis(linear_int1, c("Mkt.RF:SMB","SMB:HML"), vcov.=vcovHAC(linear_int1))
+G2linear_int1 = lm(SMALL.LoBM ~ Mkt.RF + SMB + HML + Mkt.RF:HML, data=Dane3FF)
+resettest(G2linear_int1, power=2:3, type="fitted")
+coeftest(G2linear_int1, vcov.=vcovHAC(G2linear_int1))
+
+linearHypothesis(linear_int1, c("Mkt.RF:SMB","SMB:HML","Mkt.RF:HML"), vcov.=vcovHAC(linear_int1))
+G3linear_int1 = lm(SMALL.LoBM ~ Mkt.RF + SMB + HML, data=Dane3FF)
+resettest(G3linear_int1, power=2:3, type="fitted")
+coeftest(G3linear_int1, vcov.=vcovHAC(G3linear_int1))
+
+Coef = data.frame()
+Stats = data.frame()
+Coef<-t(as.data.frame(rbind(coeftest(G3linear_int1, vcov.=vcovHAC(G3linear_int1))[,1],
+                     coeftest(G3linear_int1, vcov.=vcovHAC(G3linear_int1))[,4])))
+
+#p-v inter=0
+#zmienne łącznie istotne
+Stats<-rbind(Stats,-1)
+#rest fit
+Stats<-rbind(Stats,resettest(G3linear_int1, power=2:3, type="fitted")$p.value)
+#rest reg (rhs)
+Stats<-rbind(Stats,resettest(G3linear_int1, power=2:3, type="regressor")$p.value)
+#Breusch-Godfrey
+Stats<-rbind(Stats,bgtest(G3linear_int1, order = 1)$p.value)
+#R^2
+Stats<-rbind(Stats,summary(G3linear_int1)$r.squared)
+#Adjusted R^2
+Stats<-rbind(Stats,summary(G3linear_int1)$adj.r.squared)
+#AIC
+Stats<-rbind(Stats,AIC(G3linear_int1))
+#SIC
+Stats<-rbind(Stats,BIC(G3linear_int1))
+#N
+Stats<-rbind(Stats,summary(G3linear_int1)$df[1]+summary(G3linear_int1)$df[2])
+
+write.xlsx(Coef,"linear_int_SMALL.LoBM.xlsx", sheetName="Coef")
+write.xlsx(Stats,"linear_int_SMALL.LoBM.xlsx", sheetName="Stats", append=TRUE)
+```
+## ME1.BM2 NIE przechodzi reset w dowolnej konfiguracji interkacji
+```{r}
+#2) Portfel
+linear_int2 = lm(ME1.BM2 ~ Mkt.RF + SMB + HML + Mkt.RF:SMB + Mkt.RF:HML + SMB:HML,data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+#przechodzi reset
+resettest(linear_int2, power=2:3, type="fitted")
+coeftest(linear_int2, vcov.=vcovHAC(linear_int2))
+
+linearHypothesis(linear_int2, c("SMB:HML"), vcov.=vcovHAC(linear_int2))
+G1linear_int2 <- lm(ME1.BM2 ~ Mkt.RF + SMB + HML + Mkt.RF:SMB + Mkt.RF:HML,data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+resettest(G1linear_int2, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(G1linear_int2, vcov.=vcovHAC(G1linear_int2))
+
+linearHypothesis(linear_int2, c("SMB:HML","Mkt.RF:SMB"), vcov.=vcovHAC(linear_int2))
+G2linear_int2 <- lm(ME1.BM2 ~ Mkt.RF + SMB + HML + Mkt.RF:HML,data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+resettest(G2linear_int2, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(G2linear_int2, vcov.=vcovHAC(G2linear_int2))
+
+linearHypothesis(linear_int2, c("SMB:HML","Mkt.RF:SMB","Mkt.RF:HML"), vcov.=vcovHAC(linear_int2))
+G3linear_int2 <- lm(ME1.BM2 ~ Mkt.RF + SMB + HML,data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+resettest(G3linear_int2, power=2:3, type="fitted")
+#odporna Newey-West
+coeftest(G3linear_int2, vcov.=vcovHAC(G3linear_int2))
+
+Coef = data.frame()
+Stats = data.frame()
+Coef<-t(as.data.frame(rbind(coeftest(G3linear_int2, vcov.=vcovHAC(G3linear_int2))[,1],
+                     coeftest(G3linear_int2, vcov.=vcovHAC(G3linear_int2))[,4])))
+
+#p-v inter=0
+#zmienne łącznie istotne
+Stats<-rbind(Stats,-1)
+#rest fit
+Stats<-rbind(Stats,resettest(G3linear_int2, power=2:3, type="fitted")$p.value)
+#rest reg (rhs)
+Stats<-rbind(Stats,resettest(G3linear_int2, power=2:3, type="regressor")$p.value)
+#Breusch-Godfrey
+Stats<-rbind(Stats,bgtest(G3linear_int2, order = 1)$p.value)
+#R^2
+Stats<-rbind(Stats,summary(G3linear_int2)$r.squared)
+#Adjusted R^2
+Stats<-rbind(Stats,summary(G3linear_int2)$adj.r.squared)
+#AIC
+Stats<-rbind(Stats,AIC(G3linear_int2))
+#SIC
+Stats<-rbind(Stats,BIC(G3linear_int2))
+#N
+Stats<-rbind(Stats,summary(G3linear_int2)$df[1]+summary(G3linear_int2)$df[2])
+
+write.xlsx(Coef,"linear_int_ME1.BM2.xlsx", sheetName="Coef")
+write.xlsx(Stats,"linear_int_ME1.BM2.xlsx", sheetName="Stats", append=TRUE)
+```
+## SMALL.HiBM przechodzi resety
+```{r}
+#3) Portfel
+linear_int3 = lm(SMALL.HiBM ~ Mkt.RF + SMB + HML+ Mkt.RF:SMB + Mkt.RF:HML + SMB:HML,data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+#NIE PRZECHODZI RESET
+resettest(linear_int3, power=2:3, type="fitted")
+coeftest(linear_int3, vcov.=vcovHAC(linear_int3))
+#GETS
+linearHypothesis(linear_int3, "Mkt.RF:HML", vcov.=vcovHAC(linear_int3))
+G1linear_int3 = lm(SMALL.HiBM ~ Mkt.RF + SMB + HML+ Mkt.RF:SMB + SMB:HML, data=Dane3FF)
+resettest(G1linear_int3, power=2:3, type="fitted")
+coeftest(G1linear_int3, vcov.=vcovHAC(G1linear_int3))
+
+linearHypothesis(linear_int3, c("Mkt.RF:SMB","SMB:HML"), vcov.=vcovHAC(linear_int3))
+G2linear_int3 = lm(SMALL.HiBM ~ Mkt.RF + SMB + HML+ Mkt.RF:HML, data=Dane3FF)
+resettest(G2linear_int3, power=2:3, type="fitted")
+coeftest(G2linear_int3, vcov.=vcovHAC(G2linear_int3))
+
+linearHypothesis(linear_int3, c("Mkt.RF:SMB","SMB:HML","Mkt.RF:HML"), vcov.=vcovHAC(linear_int3))
+G3linear_int3 = lm(SMALL.HiBM ~ Mkt.RF + SMB + HML, data=Dane3FF)
+resettest(G3linear_int3, power=2:3, type="fitted")
+coeftest(G3linear_int3, vcov.=vcovHAC(G3linear_int3))
+
+Coef = data.frame()
+Stats = data.frame()
+Coef<-t(as.data.frame(rbind(coeftest(G3linear_int3, vcov.=vcovHAC(G3linear_int3))[,1],
+                     coeftest(G3linear_int3, vcov.=vcovHAC(G3linear_int3))[,4])))
+
+#p-v inter=0
+#zmienne łącznie istotne
+Stats<-rbind(Stats,-1)
+#rest fit
+Stats<-rbind(Stats,resettest(G3linear_int3, power=2:3, type="fitted")$p.value)
+#rest reg (rhs)
+Stats<-rbind(Stats,resettest(G3linear_int3, power=2:3, type="regressor")$p.value)
+#Breusch-Godfrey
+Stats<-rbind(Stats,bgtest(G3linear_int3, order = 1)$p.value)
+#R^2
+Stats<-rbind(Stats,summary(G3linear_int3)$r.squared)
+#Adjusted R^2
+Stats<-rbind(Stats,summary(G3linear_int3)$adj.r.squared)
+#AIC
+Stats<-rbind(Stats,AIC(G3linear_int3))
+#SIC
+Stats<-rbind(Stats,BIC(G3linear_int3))
+#N
+Stats<-rbind(Stats,summary(G3linear_int3)$df[1]+summary(G3linear_int3)$df[2])
+
+write.xlsx(Coef,"linear_int_Small.HiBM.xlsx", sheetName="Coef")
+write.xlsx(Stats,"linear_int_Small.HiBM.xlsx", sheetName="Stats", append=TRUE)
+```
+## BIG.LoBM przechodzi reset
+```{r}
+#4) Portfel
+linear_int4 = lm(BIG.LoBM ~ Mkt.RF + SMB + HML + Mkt.RF:SMB + Mkt.RF:HML + SMB:HML, data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+#przechodzi reset
+resettest(linear_int4, power=2:3, type="fitted")
+coeftest(linear_int4, vcov.=vcovHAC(linear_int4))
+#GETS
+linearHypothesis(linear_int4, "Mkt.RF:SMB", vcov.=vcovHAC(linear_int4))
+G1linear_int4 = lm(BIG.LoBM ~ Mkt.RF + SMB + HML + Mkt.RF:HML + SMB:HML, data=Dane3FF)
+resettest(G1linear_int4, power=2:3, type="fitted")
+coeftest(G1linear_int4, vcov.=vcovHAC(G1linear_int4))
+
+linearHypothesis(linear_int4, c("Mkt.RF:SMB","Mkt.RF:HML"), vcov.=vcovHAC(linear_int4))
+G2linear_int4 = lm(BIG.LoBM ~ Mkt.RF + SMB + HML + SMB:HML, data=Dane3FF)
+resettest(G2linear_int4, power=2:3, type="fitted")
+coeftest(G2linear_int4, vcov.=vcovHAC(G2linear_int4))
+
+linearHypothesis(linear_int4, c("Mkt.RF:SMB","Mkt.RF:HML","SMB:HML"), vcov.=vcovHAC(linear_int4))
+G3linear_int4 = lm(BIG.LoBM ~ Mkt.RF + SMB + HML, data=Dane3FF)
+resettest(G3linear_int4, power=2:3, type="fitted")
+coeftest(G3linear_int4, vcov.=vcovHAC(G3linear_int4))
+
+Coef = data.frame()
+Stats = data.frame()
+Coef<-t(as.data.frame(rbind(coeftest(G3linear_int4, vcov.=vcovHAC(G3linear_int4))[,1],
+                     coeftest(G3linear_int4, vcov.=vcovHAC(G3linear_int4))[,4])))
+
+#p-v inter=0
+#zmienne łącznie istotne
+Stats<-rbind(Stats,-1)
+#rest fit
+Stats<-rbind(Stats,resettest(G3linear_int4, power=2:3, type="fitted")$p.value)
+#rest reg (rhs)
+Stats<-rbind(Stats,resettest(G3linear_int4, power=2:3, type="regressor")$p.value)
+#Breusch-Godfrey
+Stats<-rbind(Stats,bgtest(G3linear_int4, order = 1)$p.value)
+#R^2
+Stats<-rbind(Stats,summary(G3linear_int4)$r.squared)
+#Adjusted R^2
+Stats<-rbind(Stats,summary(G3linear_int4)$adj.r.squared)
+#AIC
+Stats<-rbind(Stats,AIC(G3linear_int4))
+#SIC
+Stats<-rbind(Stats,BIC(G3linear_int4))
+#N
+Stats<-rbind(Stats,summary(G3linear_int4)$df[1]+summary(G3linear_int4)$df[2])
+
+write.xlsx(Coef,"linear_int_BIG.LoBM.xlsx", sheetName="Coef")
+write.xlsx(Stats,"linear_int_BIG.LoBM.xlsx", sheetName="Stats", append=TRUE)
+```
+## ME2.BM2 
+```{r}
+#5) Portfel
+linear_int5 = lm(ME2.BM2 ~ Mkt.RF + SMB + HML+ Mkt.RF:SMB + Mkt.RF:HML + SMB:HML,data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+#NIE PRZECHODZI RESET
+resettest(linear_int5, power=2:3, type="fitted")
+coeftest(linear_int5, vcov.=vcovHAC(linear_int5))
+#GETS
+linearHypothesis(linear_int5, "Mkt.RF:SMB", vcov.=vcovHAC(linear_int5))
+G1linear_int5 = lm(ME2.BM2 ~ Mkt.RF + SMB + HML + Mkt.RF:HML + SMB:HML,data=Dane3FF)
+resettest(G1linear_int5, power=2:3, type="fitted")
+coeftest(G1linear_int5, vcov.=vcovHAC(G1linear_int5))
+
+linearHypothesis(linear_int5, c("Mkt.RF:SMB","SMB:HML"), vcov.=vcovHAC(linear_int5))
+G2linear_int5 = lm(ME2.BM2 ~ Mkt.RF + SMB + HML + Mkt.RF:HML, data=Dane3FF)
+resettest(G2linear_int5, power=2:3, type="fitted")
+coeftest(G2linear_int5, vcov.=vcovHAC(G2linear_int5))
+
+linearHypothesis(linear_int5, c("Mkt.RF:SMB","SMB:HML","Mkt.RF:HML"), vcov.=vcovHAC(linear_int5))
+G3linear_int5 = lm(ME2.BM2 ~ Mkt.RF + SMB + HML, data=Dane3FF)
+resettest(G3linear_int5, power=2:3, type="fitted")
+coeftest(G3linear_int5, vcov.=vcovHAC(G3linear_int5))
+
+Coef = data.frame()
+Stats = data.frame()
+Coef<-t(as.data.frame(rbind(coeftest(G3linear_int5, vcov.=vcovHAC(G3linear_int5))[,1],
+                     coeftest(G3linear_int5, vcov.=vcovHAC(G3linear_int5))[,4])))
+
+#p-v inter=0
+#zmienne łącznie istotne
+Stats<-rbind(Stats,-1)
+#rest fit
+Stats<-rbind(Stats,resettest(G3linear_int5, power=2:3, type="fitted")$p.value)
+#rest reg (rhs)
+Stats<-rbind(Stats,resettest(G3linear_int5, power=2:3, type="regressor")$p.value)
+#Breusch-Godfrey
+Stats<-rbind(Stats,bgtest(G3linear_int5, order = 1)$p.value)
+#R^2
+Stats<-rbind(Stats,summary(G3linear_int5)$r.squared)
+#Adjusted R^2
+Stats<-rbind(Stats,summary(G3linear_int5)$adj.r.squared)
+#AIC
+Stats<-rbind(Stats,AIC(G3linear_int5))
+#SIC
+Stats<-rbind(Stats,BIC(G3linear_int5))
+#N
+Stats<-rbind(Stats,summary(G3linear_int5)$df[1]+summary(G3linear_int5)$df[2])
+
+write.xlsx(Coef,"linear_int_ME2.BM2.xlsx", sheetName="Coef")
+write.xlsx(Stats,"linear_int_ME2.BM2.xlsx", sheetName="Stats", append=TRUE)
+```
+## BIG.HiBM 
+```{r}
+#6) Portfel
+linear_int6 = lm(BIG.HiBM ~ Mkt.RF + SMB + HML + Mkt.RF:SMB + Mkt.RF:HML + SMB:HML,data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+#przechodzi reset
+resettest(linear_int6, power=2:3, type="fitted")
+coeftest(linear_int6, vcov.=vcovHAC(linear_int6))
+
+linearHypothesis(linear_int6, "Mkt.RF:SMB", vcov.=vcovHAC(linear_int6))
+G1linear_int6 = lm(BIG.HiBM ~ Mkt.RF + SMB + HML + Mkt.RF:HML + SMB:HML,data=Dane3FF)
+resettest(G1linear_int6, power=2:3, type="fitted")
+coeftest(G1linear_int6, vcov.=vcovHAC(G1linear_int5))
+
+linearHypothesis(linear_int6, c("Mkt.RF:SMB","SMB:HML"), vcov.=vcovHAC(linear_int6))
+G2linear_int6 = lm(BIG.HiBM ~ Mkt.RF + SMB + HML + Mkt.RF:HML,data=Dane3FF)
+resettest(G2linear_int6, power=2:3, type="fitted")
+coeftest(G2linear_int6, vcov.=vcovHAC(G2linear_int5))
+
+linearHypothesis(linear_int6, c("Mkt.RF:SMB","SMB:HML","Mkt.RF:HML"), vcov.=vcovHAC(linear_int6))
+G3linear_int6 = lm(BIG.HiBM ~ Mkt.RF + SMB + HML,data=Dane3FF)
+resettest(G3linear_int6, power=2:3, type="fitted")
+coeftest(G3linear_int6, vcov.=vcovHAC(G3linear_int5))
+
+Coef = data.frame()
+Stats = data.frame()
+Coef<-t(as.data.frame(rbind(coeftest(G3linear_int6, vcov.=vcovHAC(G3linear_int6))[,1],
+                     coeftest(G3linear_int6, vcov.=vcovHAC(G3linear_int6))[,4])))
+
+#p-v inter=0
+#zmienne łącznie istotne
+Stats<-rbind(Stats,-1)
+#rest fit
+Stats<-rbind(Stats,resettest(G3linear_int6, power=2:3, type="fitted")$p.value)
+#rest reg (rhs)
+Stats<-rbind(Stats,resettest(G3linear_int6, power=2:3, type="regressor")$p.value)
+#Breusch-Godfrey
+Stats<-rbind(Stats,bgtest(G3linear_int6, order = 1)$p.value)
+#R^2
+Stats<-rbind(Stats,summary(G3linear_int6)$r.squared)
+#Adjusted R^2
+Stats<-rbind(Stats,summary(G3linear_int6)$adj.r.squared)
+#AIC
+Stats<-rbind(Stats,AIC(G3linear_int6))
+#SIC
+Stats<-rbind(Stats,BIC(G3linear_int6))
+#N
+Stats<-rbind(Stats,summary(G3linear_int6)$df[1]+summary(G3linear_int6)$df[2])
+
+write.xlsx(Coef,"linear_int_BIG.HiBM.xlsx", sheetName="Coef")
+write.xlsx(Stats,"linear_int_BIG.HiBM.xlsx", sheetName="Stats", append=TRUE)
+```
+## Model kwadratowy z interakcjami
+## SMALL.LoBM
+```{r}
+#1) Portfel
+quad_int1 = lm(SMALL.LoBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) + HML + I(HML^2)
+                + Mkt.RF:SMB + Mkt.RF:HML + SMB:HML, data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+#NIE PRZECHODZI RESET
+resettest(quad_int1, power=2:3, type="fitted")
+#macierz odporna
+coeftest(quad_int1, vcov.=vcovHAC(quad_int1))
+
+#GETS nie odrzucamy SMB
+linearHypothesis(quad_int1, "Mkt.RF:SMB", vcov.=vcovHAC(quad_int1))
+G1quad_int1 = lm(SMALL.LoBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) + HML + I(HML^2)
+                 + Mkt.RF:HML + SMB:HML, data=Dane3FF)
+resettest(G1quad_int1, power=2:3, type="fitted")
+coeftest(G1quad_int1, vcov.=vcovHAC(G1quad_int1))
+
+linearHypothesis(quad_int1, c("Mkt.RF:SMB","I(HML^2)"), vcov.=vcovHAC(quad_int1))
+G2quad_int1 = lm(SMALL.LoBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) + HML
+                 + Mkt.RF:HML + SMB:HML, data=Dane3FF)
+resettest(G2quad_int1, power=2:3, type="fitted")
+coeftest(G2quad_int1, vcov.=vcovHAC(G2quad_int1))
+
+linearHypothesis(quad_int1, c("Mkt.RF:SMB","I(HML^2)","SMB:HML"), vcov.=vcovHAC(quad_int1))
+G3quad_int1 = lm(SMALL.LoBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) + HML
+                 + Mkt.RF:HML, data=Dane3FF)
+resettest(G3quad_int1, power=2:3, type="fitted")
+coeftest(G3quad_int1, vcov.=vcovHAC(G3quad_int1))
+
+linearHypothesis(quad_int1, c("Mkt.RF:SMB","I(HML^2)","SMB:HML","Mkt.RF:HML"), vcov.=vcovHAC(quad_int1))
+G4quad_int1 = lm(SMALL.LoBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) + HML, data=Dane3FF)
+resettest(G4quad_int1, power=2:3, type="fitted")
+coeftest(G4quad_int1, vcov.=vcovHAC(G4quad_int1))
+
+linearHypothesis(quad_int1, c("Mkt.RF:SMB","I(HML^2)","SMB:HML","Mkt.RF:HML","I(SMB^2)"), 
+                 vcov.=vcovHAC(quad_int1))
+G5quad_int1 = lm(SMALL.LoBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + HML, data=Dane3FF)
+resettest(G5quad_int1, power=2:3, type="fitted")
+coeftest(G5quad_int1, vcov.=vcovHAC(G5quad_int1))
+
+linearHypothesis(quad_int1, c("Mkt.RF:SMB","I(HML^2)","SMB:HML","Mkt.RF:HML","I(SMB^2)","I(Mkt.RF^2)"), 
+                 vcov.=vcovHAC(quad_int1))
+G6quad_int1 = lm(SMALL.LoBM ~ Mkt.RF + SMB + HML, data=Dane3FF)
+resettest(G6quad_int1, power=2:3, type="fitted")
+coeftest(G6quad_int1, vcov.=vcovHAC(G6quad_int1))
+
+Coef = data.frame()
+Stats = data.frame()
+Coef<-t(as.data.frame(rbind(coeftest(G6quad_int1, vcov.=vcovHAC(G6quad_int1))[,1],
+                     coeftest(G6quad_int1, vcov.=vcovHAC(G6quad_int1))[,4])))
+
+
+#p-v ^2=0
+Stats<-rbind(Stats,-1)
+#p-v inter=0
+Stats<-rbind(Stats,-1)
+#p-v ^2=0  i inter=0
+Stats<-rbind(Stats,-1)
+#rest fit
+Stats<-rbind(Stats,resettest(G6quad_int1, power=2:3, type="fitted")$p.value)
+#rest reg (rhs)
+Stats<-rbind(Stats,resettest(G6quad_int1, power=2:3, type="regressor")$p.value)
+#Breusch-Godfrey
+Stats<-rbind(Stats,bgtest(G6quad_int1, order = 1)$p.value)
+#R^2
+Stats<-rbind(Stats,summary(G6quad_int1)$r.squared)
+#Adjusted R^2
+Stats<-rbind(Stats,summary(G6quad_int1)$adj.r.squared)
+#AIC
+Stats<-rbind(Stats,AIC(G6quad_int1))
+#SIC
+Stats<-rbind(Stats,BIC(G6quad_int1))
+#N
+Stats<-rbind(Stats,summary(G6quad_int1)$df[1]+summary(G6quad_int1)$df[2])
+
+write.xlsx(Coef,"quad_int_SMALL.LoBM.xlsx", sheetName="Coef")
+write.xlsx(Stats,"quad_int_SMALL.LoBM.xlsx", sheetName="Stats", append=TRUE)
+```
+## ME1.BM2
+```{r}
+#1) Portfel
+quad_int2 = lm(ME1.BM2 ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) + HML + I(HML^2)
+                + Mkt.RF:SMB + Mkt.RF:HML + SMB:HML, data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+#NIE PRZECHODZI RESET
+resettest(quad_int2, power=2:3, type="fitted")
+#macierz odporna
+coeftest(quad_int2, vcov.=vcovHAC(quad_int2))
+
+#GETS nie odrzucamy SMB
+linearHypothesis(quad_int2, "Mkt.RF:HML", vcov.=vcovHAC(quad_int2))
+G1quad_int2 = lm(ME1.BM2 ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) + HML + I(HML^2)
+                + Mkt.RF:SMB + SMB:HML, data=Dane3FF)
+resettest(G1quad_int2, power=2:3, type="fitted")
+coeftest(G1quad_int2, vcov.=vcovHAC(G1quad_int2))
+
+linearHypothesis(quad_int2, c("Mkt.RF:HML","I(HML^2)"), vcov.=vcovHAC(quad_int2))
+G2quad_int2 = lm(ME1.BM2 ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) + HML
+                + Mkt.RF:SMB + SMB:HML, data=Dane3FF)
+resettest(G2quad_int2, power=2:3, type="fitted")
+coeftest(G2quad_int2, vcov.=vcovHAC(G2quad_int2))
+
+linearHypothesis(quad_int2, c("Mkt.RF:HML","I(HML^2)","SMB:HML"), vcov.=vcovHAC(quad_int2))
+G3quad_int2 = lm(ME1.BM2 ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) + HML
+                + Mkt.RF:SMB, data=Dane3FF)
+resettest(G3quad_int2, power=2:3, type="fitted")
+coeftest(G3quad_int2, vcov.=vcovHAC(G3quad_int2))
+
+linearHypothesis(quad_int2, c("Mkt.RF:HML","I(HML^2)","SMB:HML","I(SMB^2)"), vcov.=vcovHAC(quad_int2))
+G4quad_int2 = lm(ME1.BM2 ~ Mkt.RF + I(Mkt.RF^2) + SMB + HML
+                + Mkt.RF:SMB, data=Dane3FF)
+resettest(G4quad_int2, power=2:3, type="fitted")
+coeftest(G4quad_int2, vcov.=vcovHAC(G4quad_int2))
+
+linearHypothesis(quad_int2, c("Mkt.RF:HML","I(HML^2)","SMB:HML","I(SMB^2)","Mkt.RF:SMB"), vcov.=vcovHAC(quad_int2))
+G4quad_int2 = lm(ME1.BM2 ~ Mkt.RF + I(Mkt.RF^2) + SMB + HML, data=Dane3FF)
+resettest(G4quad_int2, power=2:3, type="fitted")
+coeftest(G4quad_int2, vcov.=vcovHAC(G4quad_int2))
+
+Coef = data.frame()
+Stats = data.frame()
+Coef<-t(as.data.frame(rbind(coeftest(G4quad_int2, vcov.=vcovHAC(G4quad_int2))[,1],
+                     coeftest(G4quad_int2, vcov.=vcovHAC(G4quad_int2))[,4])))
+
+#p-v ^2=0 nie ma
+Stats<-rbind(Stats,linearHypothesis(G4quad_int2, "I(Mkt.RF^2)")["Pr(>F)"][2,])
+#p-v inter=0
+Stats<-rbind(Stats,-1)
+#p-v ^2=0  i inter=0
+Stats<-rbind(Stats,-1)
+#rest fit
+Stats<-rbind(Stats,resettest(G4quad_int2, power=2:3, type="fitted")$p.value)
+#rest reg (rhs)
+Stats<-rbind(Stats,resettest(G4quad_int2, power=2:3, type="regressor")$p.value)
+#Breusch-Godfrey
+Stats<-rbind(Stats,bgtest(G4quad_int2, order = 1)$p.value)
+#R^2
+Stats<-rbind(Stats,summary(G4quad_int2)$r.squared)
+#Adjusted R^2
+Stats<-rbind(Stats,summary(G4quad_int2)$adj.r.squared)
+#AIC
+Stats<-rbind(Stats,AIC(G4quad_int2))
+#SIC
+Stats<-rbind(Stats,BIC(G4quad_int2))
+#N
+Stats<-rbind(Stats,summary(G4quad_int2)$df[1]+summary(G4quad_int2)$df[2])
+
+write.xlsx(Coef,"quad_int_ME1.BM2.xlsx", sheetName="Coef")
+write.xlsx(Stats,"quad_int_ME1.BM2.xlsx", sheetName="Stats", append=TRUE)
+```
+## SMALL.HiBM
+```{r}
+#1) Portfel
+quad_int3 = lm(SMALL.HiBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) + HML + I(HML^2)
+                + Mkt.RF:SMB + Mkt.RF:HML + SMB:HML, data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+#NIE PRZECHODZI RESET
+resettest(quad_int3, power=2:3, type="fitted")
+#macierz odporna
+coeftest(quad_int3, vcov.=vcovHAC(quad_int3))
+
+#GETS nie odrzucamy SMB
+linearHypothesis(quad_int3, "Mkt.RF:SMB", vcov.=vcovHAC(quad_int3))
+G1quad_int3 = lm(SMALL.HiBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) + HML + I(HML^2)
+                 + Mkt.RF:HML + SMB:HML, data=Dane3FF)
+resettest(G1quad_int3, power=2:3, type="fitted")
+coeftest(G1quad_int3, vcov.=vcovHAC(G1quad_int2))
+
+linearHypothesis(quad_int3, c("Mkt.RF:SMB","SMB:HML"), vcov.=vcovHAC(quad_int3))
+G2quad_int3 = lm(SMALL.HiBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) + HML + I(HML^2)
+                 + Mkt.RF:HML, data=Dane3FF)
+resettest(G2quad_int3, power=2:3, type="fitted")
+coeftest(G2quad_int3, vcov.=vcovHAC(G2quad_int3))
+
+linearHypothesis(quad_int3, c("Mkt.RF:SMB","SMB:HML","Mkt.RF:HML"), vcov.=vcovHAC(quad_int3))
+G3quad_int3 = lm(SMALL.HiBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) + HML + I(HML^2), data=Dane3FF)
+resettest(G3quad_int3, power=2:3, type="fitted")
+coeftest(G3quad_int3, vcov.=vcovHAC(G3quad_int3))
+
+linearHypothesis(quad_int3, c("Mkt.RF:SMB","SMB:HML","Mkt.RF:HML","I(Mkt.RF^2)"), vcov.=vcovHAC(quad_int3))
+G4quad_int3 = lm(SMALL.HiBM ~ Mkt.RF + SMB + I(SMB^2) + HML + I(HML^2), data=Dane3FF)
+resettest(G4quad_int3, power=2:3, type="fitted")
+coeftest(G4quad_int3, vcov.=vcovHAC(G4quad_int3))
+
+linearHypothesis(quad_int3, c("Mkt.RF:SMB","SMB:HML","Mkt.RF:HML","I(Mkt.RF^2)","I(HML^2)"), vcov.=vcovHAC(quad_int3))
+G4quad_int3 = lm(SMALL.HiBM ~ Mkt.RF + SMB + I(SMB^2) + HML, data=Dane3FF)
+resettest(G4quad_int3, power=2:3, type="fitted")
+coeftest(G4quad_int3, vcov.=vcovHAC(G4quad_int3))
+
+linearHypothesis(quad_int3, c("Mkt.RF:SMB","SMB:HML","Mkt.RF:HML","I(Mkt.RF^2)","I(HML^2)","I(SMB^2)"), vcov.=vcovHAC(quad_int3))
+G4quad_int3 = lm(SMALL.HiBM ~ Mkt.RF + SMB + HML, data=Dane3FF)
+resettest(G4quad_int3, power=2:3, type="fitted")
+coeftest(G4quad_int3, vcov.=vcovHAC(G4quad_int3))
+
+Coef = data.frame()
+Stats = data.frame()
+Coef<-t(as.data.frame(rbind(coeftest(G4quad_int3, vcov.=vcovHAC(G4quad_int3))[,1],
+                     coeftest(G4quad_int3, vcov.=vcovHAC(G4quad_int3))[,4])))
+
+#p-v ^2=0 nie ma
+Stats<-rbind(Stats,-1)
+#p-v inter=0
+Stats<-rbind(Stats,-1)
+#p-v ^2=0  i inter=0
+Stats<-rbind(Stats,-1)
+#rest fit
+Stats<-rbind(Stats,resettest(G4quad_int3, power=2:3, type="fitted")$p.value)
+#rest reg (rhs)
+Stats<-rbind(Stats,resettest(G4quad_int3, power=2:3, type="regressor")$p.value)
+#Breusch-Godfrey
+Stats<-rbind(Stats,bgtest(G4quad_int3, order = 1)$p.value)
+#R^2
+Stats<-rbind(Stats,summary(G4quad_int3)$r.squared)
+#Adjusted R^2
+Stats<-rbind(Stats,summary(G4quad_int3)$adj.r.squared)
+#AIC
+Stats<-rbind(Stats,AIC(G4quad_int3))
+#SIC
+Stats<-rbind(Stats,BIC(G4quad_int3))
+#N
+Stats<-rbind(Stats,summary(G4quad_int3)$df[1]+summary(G4quad_int3)$df[2])
+
+write.xlsx(Coef,"quad_int_SMALL.HiBM.xlsx", sheetName="Coef")
+write.xlsx(Stats,"quad_int_SMALL.HiBM.xlsx", sheetName="Stats", append=TRUE)
+```
+## BIG.LoBM
+```{r}
+#1) Portfel
+quad_int4 = lm(BIG.LoBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) + HML + I(HML^2)
+                + Mkt.RF:SMB + Mkt.RF:HML + SMB:HML, data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+#NIE PRZECHODZI RESET
+resettest(quad_int4, power=2:3, type="fitted")
+#macierz odporna
+coeftest(quad_int4, vcov.=vcovHAC(quad_int4))
+
+#GETS nie odrzucamy SMB
+linearHypothesis(quad_int4, "SMB:HML", vcov.=vcovHAC(quad_int4))
+G1quad_int4 = lm(BIG.LoBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) + HML + I(HML^2)
+                + Mkt.RF:SMB + Mkt.RF:HML, data=Dane3FF)
+resettest(G1quad_int4, power=2:3, type="fitted")
+coeftest(G1quad_int4, vcov.=vcovHAC(G1quad_int4))
+
+linearHypothesis(quad_int4, c("SMB:HML","Mkt.RF:SMB"), vcov.=vcovHAC(quad_int4))
+G2quad_int4 = lm(BIG.LoBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) + HML + I(HML^2) + Mkt.RF:HML, data=Dane3FF)
+resettest(G2quad_int4, power=2:3, type="fitted")
+coeftest(G2quad_int4, vcov.=vcovHAC(G2quad_int4))
+
+linearHypothesis(quad_int4, c("SMB:HML","Mkt.RF:SMB","Mkt.RF:HML"), vcov.=vcovHAC(quad_int4))
+G2quad_int4 = lm(BIG.LoBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) + HML + I(HML^2), data=Dane3FF)
+resettest(G2quad_int4, power=2:3, type="fitted")
+coeftest(G2quad_int4, vcov.=vcovHAC(G2quad_int4))
+
+linearHypothesis(quad_int4, c("SMB:HML","Mkt.RF:SMB","Mkt.RF:HML","I(Mkt.RF^2)"), vcov.=vcovHAC(quad_int4))
+G2quad_int4 = lm(BIG.LoBM ~ Mkt.RF + SMB + I(SMB^2) + HML + I(HML^2), data=Dane3FF)
+resettest(G2quad_int4, power=2:3, type="fitted")
+coeftest(G2quad_int4, vcov.=vcovHAC(G2quad_int4))
+
+linearHypothesis(quad_int4, c("SMB:HML","Mkt.RF:SMB","Mkt.RF:HML","I(Mkt.RF^2)","I(SMB^2)"), vcov.=vcovHAC(quad_int4))
+G2quad_int4 = lm(BIG.LoBM ~ Mkt.RF + SMB + HML + I(HML^2), data=Dane3FF)
+resettest(G2quad_int4, power=2:3, type="fitted")
+coeftest(G2quad_int4, vcov.=vcovHAC(G2quad_int4))
+
+Coef = data.frame()
+Stats = data.frame()
+Coef<-t(as.data.frame(rbind(coeftest(G2quad_int4, vcov.=vcovHAC(G2quad_int4))[,1],
+                     coeftest(G2quad_int4, vcov.=vcovHAC(G2quad_int4))[,4])))
+
+#p-v ^2=0 nie ma
+Stats<-rbind(Stats,linearHypothesis(G2quad_int4, "I(HML^2)")["Pr(>F)"][2,])
+#p-v inter=0
+Stats<-rbind(Stats,-1)
+#p-v ^2=0  i inter=0
+Stats<-rbind(Stats,-1)
+#rest fit
+Stats<-rbind(Stats,resettest(G2quad_int4, power=2:3, type="fitted")$p.value)
+#rest reg (rhs)
+Stats<-rbind(Stats,resettest(G2quad_int4, power=2:3, type="regressor")$p.value)
+#Breusch-Godfrey
+Stats<-rbind(Stats,bgtest(G2quad_int4, order = 1)$p.value)
+#R^2
+Stats<-rbind(Stats,summary(G2quad_int4)$r.squared)
+#Adjusted R^2
+Stats<-rbind(Stats,summary(G2quad_int4)$adj.r.squared)
+#AIC
+Stats<-rbind(Stats,AIC(G2quad_int4))
+#SIC
+Stats<-rbind(Stats,BIC(G2quad_int4))
+#N
+Stats<-rbind(Stats,summary(G2quad_int4)$df[1]+summary(G2quad_int4)$df[2])
+
+write.xlsx(Coef,"quad_int_BIG.LoBM.xlsx", sheetName="Coef")
+write.xlsx(Stats,"quad_int_BIG.LoBM.xlsx", sheetName="Stats", append=TRUE)
+```
+## ME2.BM2
+```{r}
+#1) Portfel
+quad_int5 = lm(ME2.BM2 ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) + HML + I(HML^2)
+                + Mkt.RF:SMB + Mkt.RF:HML + SMB:HML, data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+#NIE PRZECHODZI RESET
+resettest(quad_int5, power=2:3, type="fitted")
+#macierz odporna
+coeftest(quad_int5, vcov.=vcovHAC(quad_int5))
+
+#GETS nie odrzucamy SMB
+linearHypothesis(quad_int5, "Mkt.RF:SMB", vcov.=vcovHAC(quad_int5))
+G1quad_int5 = lm(ME2.BM2 ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) + HML + I(HML^2) + Mkt.RF:HML + SMB:HML, data=Dane3FF)
+resettest(G1quad_int5, power=2:3, type="fitted")
+coeftest(G1quad_int5, vcov.=vcovHAC(G1quad_int5))
+
+linearHypothesis(quad_int5, c("Mkt.RF:SMB","I(SMB^2)"), vcov.=vcovHAC(quad_int5))
+G2quad_int5 = lm(ME2.BM2 ~ Mkt.RF + I(Mkt.RF^2) + SMB + HML + I(HML^2) + Mkt.RF:HML + SMB:HML, data=Dane3FF)
+resettest(G2quad_int5, power=2:3, type="fitted")
+coeftest(G2quad_int5, vcov.=vcovHAC(G2quad_int5))
+
+linearHypothesis(quad_int5, c("Mkt.RF:SMB","I(SMB^2)","I(Mkt.RF^2)"), vcov.=vcovHAC(quad_int5))
+G3quad_int5 = lm(ME2.BM2 ~ Mkt.RF + SMB + HML + I(HML^2) + Mkt.RF:HML + SMB:HML, data=Dane3FF)
+resettest(G3quad_int5, power=2:3, type="fitted")
+coeftest(G3quad_int5, vcov.=vcovHAC(G3quad_int5))
+
+linearHypothesis(quad_int5, c("Mkt.RF:SMB","I(SMB^2)","I(Mkt.RF^2)","SMB:HML"), vcov.=vcovHAC(quad_int5))
+G4quad_int5 = lm(ME2.BM2 ~ Mkt.RF + SMB + HML + I(HML^2) + Mkt.RF:HML, data=Dane3FF)
+resettest(G4quad_int5, power=2:3, type="fitted")
+coeftest(G4quad_int5, vcov.=vcovHAC(G4quad_int5))
+
+linearHypothesis(quad_int5, c("Mkt.RF:SMB","I(SMB^2)","I(Mkt.RF^2)","SMB:HML",
+                              "I(HML^2)"), vcov.=vcovHAC(quad_int5))
+G5quad_int5 = lm(ME2.BM2 ~ Mkt.RF + SMB + HML + + Mkt.RF:HML, data=Dane3FF)
+resettest(G5quad_int5, power=2:3, type="fitted")
+coeftest(G5quad_int5, vcov.=vcovHAC(G5quad_int5))
+
+linearHypothesis(quad_int5, c("Mkt.RF:SMB","I(SMB^2)","I(Mkt.RF^2)","SMB:HML",
+                              "I(HML^2)","Mkt.RF:HML"), vcov.=vcovHAC(quad_int5))
+
+Coef = data.frame()
+Stats = data.frame()
+Coef<-t(as.data.frame(rbind(coeftest(G5quad_int5, vcov.=vcovHAC(G5quad_int5))[,1],
+                     coeftest(G5quad_int5, vcov.=vcovHAC(G5quad_int5))[,4])))
+
+#p-v ^2=0 nie ma
+Stats<-rbind(Stats,-1)
+#p-v inter=0
+Stats<-rbind(Stats,linearHypothesis(G5quad_int5, "Mkt.RF:HML")["Pr(>F)"][2,])
+#p-v ^2=0  i inter=0
+Stats<-rbind(Stats,-1)
+#rest fit
+Stats<-rbind(Stats,resettest(G5quad_int5, power=2:3, type="fitted")$p.value)
+#rest reg (rhs)
+Stats<-rbind(Stats,resettest(G5quad_int5, power=2:3, type="regressor")$p.value)
+#Breusch-Godfrey
+Stats<-rbind(Stats,bgtest(G5quad_int5, order = 1)$p.value)
+#R^2
+Stats<-rbind(Stats,summary(G5quad_int5)$r.squared)
+#Adjusted R^2
+Stats<-rbind(Stats,summary(G5quad_int5)$adj.r.squared)
+#AIC
+Stats<-rbind(Stats,AIC(G5quad_int5))
+#SIC
+Stats<-rbind(Stats,BIC(G5quad_int5))
+#N
+Stats<-rbind(Stats,summary(G5quad_int5)$df[1]+summary(G5quad_int5)$df[2])
+
+write.xlsx(Coef,"quad_int_ME2.BM2.xlsx", sheetName="Coef")
+write.xlsx(Stats,"quad_int_ME2.BM2.xlsx", sheetName="Stats", append=TRUE)
+```
+## BIG.HiBM
+```{r}
+#1) Portfel
+quad_int6 = lm(BIG.HiBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) + HML + I(HML^2)
+                + Mkt.RF:SMB + Mkt.RF:HML + SMB:HML, data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+#NIE PRZECHODZI RESET
+resettest(quad_int6, power=2:3, type="fitted")
+#macierz odporna
+coeftest(quad_int6, vcov.=vcovHAC(quad_int6))
+
+#GETS nie odrzucamy SMB
+linearHypothesis(quad_int6, "I(SMB^2)", vcov.=vcovHAC(quad_int6))
+G1quad_int6 = lm(BIG.HiBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + HML + I(HML^2)
+                + Mkt.RF:SMB + Mkt.RF:HML + SMB:HML, data=Dane3FF)
+resettest(G1quad_int6, power=2:3, type="fitted")
+coeftest(G1quad_int6, vcov.=vcovHAC(G1quad_int6))
+
+linearHypothesis(quad_int6, c("I(SMB^2)","Mkt.RF:SMB"), vcov.=vcovHAC(quad_int6))
+G2quad_int6 = lm(BIG.HiBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + HML + I(HML^2) + Mkt.RF:HML + SMB:HML, data=Dane3FF)
+resettest(G2quad_int6, power=2:3, type="fitted")
+coeftest(G2quad_int6, vcov.=vcovHAC(G2quad_int6))
+
+linearHypothesis(quad_int6, c("I(SMB^2)","Mkt.RF:SMB","I(HML^2)"), vcov.=vcovHAC(quad_int6))
+G2quad_int6 = lm(BIG.HiBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + HML + Mkt.RF:HML + SMB:HML, data=Dane3FF)
+resettest(G2quad_int6, power=2:3, type="fitted")
+coeftest(G2quad_int6, vcov.=vcovHAC(G2quad_int6))
+
+linearHypothesis(quad_int6, c("I(SMB^2)","Mkt.RF:SMB","I(HML^2)","I(Mkt.RF^2)"), vcov.=vcovHAC(quad_int6))
+G2quad_int6 = lm(BIG.HiBM ~ Mkt.RF + SMB + HML + Mkt.RF:HML + SMB:HML, data=Dane3FF)
+resettest(G2quad_int6, power=2:3, type="fitted")
+coeftest(G2quad_int6, vcov.=vcovHAC(G2quad_int6))
+
+linearHypothesis(quad_int6, c("I(SMB^2)","Mkt.RF:SMB","I(HML^2)","I(Mkt.RF^2)","SMB:HML"), vcov.=vcovHAC(quad_int6))
+G2quad_int6 = lm(BIG.HiBM ~ Mkt.RF + SMB + HML + Mkt.RF:HML, data=Dane3FF)
+resettest(G2quad_int6, power=2:3, type="fitted")
+coeftest(G2quad_int6, vcov.=vcovHAC(G2quad_int6))
+
+linearHypothesis(quad_int6, c("I(SMB^2)","Mkt.RF:SMB","I(HML^2)","I(Mkt.RF^2)","SMB:HML","Mkt.RF:HML"), vcov.=vcovHAC(quad_int6))
+G2quad_int6 = lm(BIG.HiBM ~ Mkt.RF + SMB + HML, data=Dane3FF)
+resettest(G2quad_int6, power=2:3, type="fitted")
+coeftest(G2quad_int6, vcov.=vcovHAC(G2quad_int6))
+
+Coef = data.frame()
+Stats = data.frame()
+Coef<-t(as.data.frame(rbind(coeftest(G2quad_int6, vcov.=vcovHAC(G2quad_int6))[,1],
+                     coeftest(G2quad_int6, vcov.=vcovHAC(G2quad_int6))[,4])))
+
+#p-v ^2=0 nie ma
+Stats<-rbind(Stats,-1)
+#p-v inter=0
+Stats<-rbind(Stats,-1)
+#p-v ^2=0  i inter=0
+Stats<-rbind(Stats,-1)
+#rest fit
+Stats<-rbind(Stats,resettest(G2quad_int6, power=2:3, type="fitted")$p.value)
+#rest reg (rhs)
+Stats<-rbind(Stats,resettest(G2quad_int6, power=2:3, type="regressor")$p.value)
+#Breusch-Godfrey
+Stats<-rbind(Stats,bgtest(G2quad_int6, order = 1)$p.value)
+#R^2
+Stats<-rbind(Stats,summary(G2quad_int6)$r.squared)
+#Adjusted R^2
+Stats<-rbind(Stats,summary(G2quad_int6)$adj.r.squared)
+#AIC
+Stats<-rbind(Stats,AIC(G2quad_int6))
+#SIC
+Stats<-rbind(Stats,BIC(G2quad_int6))
+#N
+Stats<-rbind(Stats,summary(G2quad_int6)$df[1]+summary(G2quad_int6)$df[2])
+
+write.xlsx(Coef,"quad_int_BIG.HiBM.xlsx", sheetName="Coef")
+write.xlsx(Stats,"quad_int_BIG.HiBM.xlsx", sheetName="Stats", append=TRUE)
+```
+## Model kwadratowy
+## SMALL.LoBM
+```{r}
+#1) Portfel
+quad1 = lm(SMALL.LoBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) + HML + I(HML^2), data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+#NIE PRZECHODZI RESET
+resettest(quad1, power=2:3, type="fitted")
+#macierz odporna
+coeftest(quad1, vcov.=vcovHAC(quad1))
+
+#GETS nie odrzucamy SMB
+linearHypothesis(quad1, "I(HML^2)", vcov.=vcovHAC(quad1))
+G1quad1 = lm(SMALL.LoBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) + HML, data=Dane3FF)
+resettest(G1quad1, power=2:3, type="fitted")
+coeftest(G1quad1, vcov.=vcovHAC(G1quad1))
+
+linearHypothesis(quad1, c("I(HML^2)","I(SMB^2)"), vcov.=vcovHAC(quad1))
+G1quad1 = lm(SMALL.LoBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + HML, data=Dane3FF)
+resettest(G1quad1, power=2:3, type="fitted")
+coeftest(G1quad1, vcov.=vcovHAC(G1quad1))
+
+linearHypothesis(quad1, c("I(HML^2)","I(SMB^2)","I(Mkt.RF^2)"), vcov.=vcovHAC(quad1))
+G1quad1 = lm(SMALL.LoBM ~ Mkt.RF + SMB + HML, data=Dane3FF)
+resettest(G1quad1, power=2:3, type="fitted")
+coeftest(G1quad1, vcov.=vcovHAC(G1quad1))
+
+Coef = data.frame()
+Stats = data.frame()
+Coef<-t(as.data.frame(rbind(coeftest(G1quad1, vcov.=vcovHAC(G1quad1))[,1],
+                     coeftest(G1quad1, vcov.=vcovHAC(G1quad1))[,4])))
+
+
+#p-v ^2=0
+Stats<-rbind(Stats,-1)
+
+#rest fit
+Stats<-rbind(Stats,resettest(G1quad1, power=2:3, type="fitted")$p.value)
+#rest reg (rhs)
+Stats<-rbind(Stats,resettest(G1quad1, power=2:3, type="regressor")$p.value)
+#Breusch-Godfrey
+Stats<-rbind(Stats,bgtest(G1quad1, order = 1)$p.value)
+#R^2
+Stats<-rbind(Stats,summary(G1quad1)$r.squared)
+#Adjusted R^2
+Stats<-rbind(Stats,summary(G1quad1)$adj.r.squared)
+#AIC
+Stats<-rbind(Stats,AIC(G1quad1))
+#SIC
+Stats<-rbind(Stats,BIC(G1quad1))
+#N
+Stats<-rbind(Stats,summary(G1quad1)$df[1]+summary(G1quad1)$df[2])
+
+write.xlsx(Coef,"quad_SMALL.LoBM.xlsx", sheetName="Coef")
+write.xlsx(Stats,"quad_SMALL.LoBM.xlsx", sheetName="Stats", append=TRUE)
+```
+## ME1.BM2
+```{r}
+#1) Portfel
+quad2 = lm(ME1.BM2 ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) + HML + I(HML^2), data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+#NIE PRZECHODZI RESET
+resettest(quad2, power=2:3, type="fitted")
+#macierz odporna
+coeftest(quad2, vcov.=vcovHAC(quad2))
+
+#GETS nie odrzucamy SMB
+linearHypothesis(quad2, "I(HML^2)", vcov.=vcovHAC(quad2))
+G1quad2 = lm(ME1.BM2 ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) + HML, data=Dane3FF)
+resettest(G1quad2, power=2:3, type="fitted")
+coeftest(G1quad2, vcov.=vcovHAC(G1quad2))
+
+linearHypothesis(quad2, c("I(HML^2)","I(SMB^2)"), vcov.=vcovHAC(quad2))
+G1quad2 = lm(ME1.BM2 ~ Mkt.RF + I(Mkt.RF^2) + SMB + HML, data=Dane3FF)
+resettest(G1quad2, power=2:3, type="fitted")
+coeftest(G1quad2, vcov.=vcovHAC(G1quad2))
+
+Coef = data.frame()
+Stats = data.frame()
+Coef<-t(as.data.frame(rbind(coeftest(G1quad2, vcov.=vcovHAC(G1quad2))[,1],
+                     coeftest(G1quad2, vcov.=vcovHAC(G1quad2))[,4])))
+
+#p-v ^2=0 nie ma
+Stats<-rbind(Stats,linearHypothesis(G1quad2, "I(Mkt.RF^2)")["Pr(>F)"][2,])
+#rest fit
+Stats<-rbind(Stats,resettest(G1quad2, power=2:3, type="fitted")$p.value)
+#rest reg (rhs)
+Stats<-rbind(Stats,resettest(G1quad2, power=2:3, type="regressor")$p.value)
+#Breusch-Godfrey
+Stats<-rbind(Stats,bgtest(G1quad2, order = 1)$p.value)
+#R^2
+Stats<-rbind(Stats,summary(G1quad2)$r.squared)
+#Adjusted R^2
+Stats<-rbind(Stats,summary(G1quad2)$adj.r.squared)
+#AIC
+Stats<-rbind(Stats,AIC(G1quad2))
+#SIC
+Stats<-rbind(Stats,BIC(G1quad2))
+#N
+Stats<-rbind(Stats,summary(G1quad2)$df[1]+summary(G1quad2)$df[2])
+
+write.xlsx(Coef,"quad_ME1.BM2.xlsx", sheetName="Coef")
+write.xlsx(Stats,"quad_ME1.BM2.xlsx", sheetName="Stats", append=TRUE)
+```
+## SMALL.HiBM
+```{r}
+#1) Portfel
+quad3 = lm(SMALL.HiBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) + HML + I(HML^2), data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+#NIE PRZECHODZI RESET
+resettest(quad3, power=2:3, type="fitted")
+#macierz odporna
+coeftest(quad3, vcov.=vcovHAC(quad3))
+
+#GETS nie odrzucamy SMB
+linearHypothesis(quad3, "I(Mkt.RF^2)", vcov.=vcovHAC(quad3))
+G1quad3 = lm(SMALL.HiBM ~ Mkt.RF + SMB + I(SMB^2) + HML + I(HML^2), data=Dane3FF)
+resettest(G1quad3, power=2:3, type="fitted")
+coeftest(G1quad3, vcov.=vcovHAC(G1quad3))
+
+linearHypothesis(quad3, c("I(Mkt.RF^2)","I(HML^2)"), vcov.=vcovHAC(quad3))
+G1quad3 = lm(SMALL.HiBM ~ Mkt.RF + SMB + I(SMB^2) + HML, data=Dane3FF)
+resettest(G1quad3, power=2:3, type="fitted")
+coeftest(G1quad3, vcov.=vcovHAC(G1quad3))
+
+linearHypothesis(quad3, c("I(Mkt.RF^2)","I(HML^2)","I(SMB^2)"), vcov.=vcovHAC(quad3))
+G1quad3 = lm(SMALL.HiBM ~ Mkt.RF + SMB + HML, data=Dane3FF)
+resettest(G1quad3, power=2:3, type="fitted")
+coeftest(G1quad3, vcov.=vcovHAC(G1quad3))
+
+Coef = data.frame()
+Stats = data.frame()
+Coef<-t(as.data.frame(rbind(coeftest(G1quad3, vcov.=vcovHAC(G1quad3))[,1],
+                     coeftest(G1quad3, vcov.=vcovHAC(G1quad3))[,4])))
+
+#p-v ^2=0 nie ma
+Stats<-rbind(Stats,-1)
+#rest fit
+Stats<-rbind(Stats,resettest(G1quad3, power=2:3, type="fitted")$p.value)
+#rest reg (rhs)
+Stats<-rbind(Stats,resettest(G1quad3, power=2:3, type="regressor")$p.value)
+#Breusch-Godfrey
+Stats<-rbind(Stats,bgtest(G1quad3, order = 1)$p.value)
+#R^2
+Stats<-rbind(Stats,summary(G1quad3)$r.squared)
+#Adjusted R^2
+Stats<-rbind(Stats,summary(G1quad3)$adj.r.squared)
+#AIC
+Stats<-rbind(Stats,AIC(G1quad3))
+#SIC
+Stats<-rbind(Stats,BIC(G1quad3))
+#N
+Stats<-rbind(Stats,summary(G1quad3)$df[1]+summary(G1quad3)$df[2])
+
+write.xlsx(Coef,"quad_SMALL.HiBM.xlsx", sheetName="Coef")
+write.xlsx(Stats,"quad_SMALL.HiBM.xlsx", sheetName="Stats", append=TRUE)
+```
+## BIG.LoBM
+```{r}
+#1) Portfel
+quad4 = lm(BIG.LoBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) + HML + I(HML^2), data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+#NIE PRZECHODZI RESET
+resettest(quad4, power=2:3, type="fitted")
+#macierz odporna
+coeftest(quad4, vcov.=vcovHAC(quad4))
+
+#GETS nie odrzucamy SMB
+linearHypothesis(quad4, "I(Mkt.RF^2)", vcov.=vcovHAC(quad4))
+G1quad4 = lm(BIG.LoBM ~ Mkt.RF + SMB + I(SMB^2) + HML + I(HML^2), data=Dane3FF)
+resettest(G1quad4, power=2:3, type="fitted")
+coeftest(G1quad4, vcov.=vcovHAC(G1quad4))
+
+linearHypothesis(quad4, c("I(Mkt.RF^2)","I(SMB^2)"), vcov.=vcovHAC(quad4))
+G1quad4 = lm(BIG.LoBM ~ Mkt.RF + SMB + HML + I(HML^2), data=Dane3FF)
+resettest(G1quad4, power=2:3, type="fitted")
+coeftest(G1quad4, vcov.=vcovHAC(G1quad4))
+
+Coef = data.frame()
+Stats = data.frame()
+Coef<-t(as.data.frame(rbind(coeftest(G1quad4, vcov.=vcovHAC(G1quad4))[,1],
+                     coeftest(G1quad4, vcov.=vcovHAC(G1quad4))[,4])))
+
+#p-v ^2=0 nie ma
+Stats<-rbind(Stats,linearHypothesis(G1quad4, c("I(HML^2)"))["Pr(>F)"][2,])
+#rest fit
+Stats<-rbind(Stats,resettest(G1quad4, power=2:3, type="fitted")$p.value)
+#rest reg (rhs)
+Stats<-rbind(Stats,resettest(G1quad4, power=2:3, type="regressor")$p.value)
+#Breusch-Godfrey
+Stats<-rbind(Stats,bgtest(G1quad4, order = 1)$p.value)
+#R^2
+Stats<-rbind(Stats,summary(G1quad4)$r.squared)
+#Adjusted R^2
+Stats<-rbind(Stats,summary(G1quad4)$adj.r.squared)
+#AIC
+Stats<-rbind(Stats,AIC(G1quad4))
+#SIC
+Stats<-rbind(Stats,BIC(G1quad4))
+#N
+Stats<-rbind(Stats,summary(G1quad4)$df[1]+summary(G1quad4)$df[2])
+
+write.xlsx(Coef,"quad_BIG.LoBM.xlsx", sheetName="Coef")
+write.xlsx(Stats,"quad_BIG.LoBM.xlsx", sheetName="Stats", append=TRUE)
+```
+## ME2.BM2
+```{r}
+#1) Portfel
+quad5 = lm(ME2.BM2 ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) + HML + I(HML^2), data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+#NIE PRZECHODZI RESET
+resettest(quad5, power=2:3, type="fitted")
+#macierz odporna
+coeftest(quad5, vcov.=vcovHAC(quad5))
+
+#GETS nie odrzucamy SMB
+linearHypothesis(quad5, "I(SMB^2)", vcov.=vcovHAC(quad5))
+G1quad5 = lm(ME2.BM2 ~ Mkt.RF + I(Mkt.RF^2) + SMB + HML + I(HML^2), data=Dane3FF)
+resettest(G1quad5, power=2:3, type="fitted")
+coeftest(G1quad5, vcov.=vcovHAC(G1quad5))
+
+
+Coef = data.frame()
+Stats = data.frame()
+Coef<-t(as.data.frame(rbind(coeftest(G1quad5, vcov.=vcovHAC(G1quad5))[,1],
+                     coeftest(G1quad5, vcov.=vcovHAC(G1quad5))[,4])))
+
+#p-v ^2=0 nie ma
+Stats<-rbind(Stats,linearHypothesis(G1quad5, c("I(HML^2)","I(Mkt.RF^2)"))["Pr(>F)"][2,])
+#rest fit
+Stats<-rbind(Stats,resettest(G1quad5, power=2:3, type="fitted")$p.value)
+#rest reg (rhs)
+Stats<-rbind(Stats,resettest(G1quad5, power=2:3, type="regressor")$p.value)
+#Breusch-Godfrey
+Stats<-rbind(Stats,bgtest(G1quad5, order = 1)$p.value)
+#R^2
+Stats<-rbind(Stats,summary(G1quad5)$r.squared)
+#Adjusted R^2
+Stats<-rbind(Stats,summary(G1quad5)$adj.r.squared)
+#AIC
+Stats<-rbind(Stats,AIC(G1quad5))
+#SIC
+Stats<-rbind(Stats,BIC(G1quad5))
+#N
+Stats<-rbind(Stats,summary(G1quad5)$df[1]+summary(G1quad5)$df[2])
+
+write.xlsx(Coef,"quad_ME2.BM2.xlsx", sheetName="Coef")
+write.xlsx(Stats,"quad_ME2.BM2.xlsx", sheetName="Stats", append=TRUE)
+```
+## BIG.HiBM
+```{r}
+#1) Portfel
+quad6 = lm(BIG.HiBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) + HML + I(HML^2), data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+#NIE PRZECHODZI RESET
+resettest(quad6, power=2:3, type="fitted")
+#macierz odporna
+coeftest(quad6, vcov.=vcovHAC(quad6))
+
+#GETS nie odrzucamy SMB
+linearHypothesis(quad6, "I(SMB^2)", vcov.=vcovHAC(quad6))
+G1quad6 = lm(BIG.HiBM ~ Mkt.RF + I(Mkt.RF^2) + SMB  + HML + I(HML^2), data=Dane3FF)
+resettest(G1quad6, power=2:3, type="fitted")
+coeftest(G1quad6, vcov.=vcovHAC(G1quad6))
+
+linearHypothesis(quad6, c("I(SMB^2)","I(HML^2)"), vcov.=vcovHAC(quad6))
+G2quad6 = lm(BIG.HiBM ~ Mkt.RF + I(Mkt.RF^2) + SMB  + HML, data=Dane3FF)
+resettest(G2quad6, power=2:3, type="fitted")
+coeftest(G2quad6, vcov.=vcovHAC(G2quad6))
+
+linearHypothesis(quad6, c("I(SMB^2)","I(HML^2)","I(Mkt.RF^2)"), vcov.=vcovHAC(quad6))
+G2quad6 = lm(BIG.HiBM ~ Mkt.RF + SMB  + HML, data=Dane3FF)
+resettest(G2quad6, power=2:3, type="fitted")
+coeftest(G2quad6, vcov.=vcovHAC(G2quad6))
+
+Coef = data.frame()
+Stats = data.frame()
+Coef<-t(as.data.frame(rbind(coeftest(G2quad6, vcov.=vcovHAC(G2quad6))[,1],
+                     coeftest(G2quad6, vcov.=vcovHAC(G2quad6))[,4])))
+
+#p-v ^2=0 nie ma
+Stats<-rbind(Stats,-1)
+#rest fit
+Stats<-rbind(Stats,resettest(G2quad6, power=2:3, type="fitted")$p.value)
+#rest reg (rhs)
+Stats<-rbind(Stats,resettest(G2quad6, power=2:3, type="regressor")$p.value)
+#Breusch-Godfrey
+Stats<-rbind(Stats,bgtest(G2quad6, order = 1)$p.value)
+#R^2
+Stats<-rbind(Stats,summary(G2quad6)$r.squared)
+#Adjusted R^2
+Stats<-rbind(Stats,summary(G2quad6)$adj.r.squared)
+#AIC
+Stats<-rbind(Stats,AIC(G2quad6))
+#SIC
+Stats<-rbind(Stats,BIC(G2quad6))
+#N
+Stats<-rbind(Stats,summary(G2quad6)$df[1]+summary(G2quad6)$df[2])
+
+write.xlsx(Coef,"quad_BIG.HiBM.xlsx", sheetName="Coef")
+write.xlsx(Stats,"quad_BIG.HiBM.xlsx", sheetName="Stats", append=TRUE)
+```
+## Model szescienny
+## SMALL.LoBM
+```{r}
+#1) Portfel
+cubic1 = lm(SMALL.LoBM ~ Mkt.RF + I(Mkt.RF^2) + I(Mkt.RF^3) + SMB + I(SMB^2) +
+             I(SMB^3) + HML + I(HML^2) + I(HML^3), data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+#NIE PRZECHODZI RESET
+resettest(cubic1, power=2:3, type="fitted")
+#macierz odporna
+coeftest(cubic1, vcov.=vcovHAC(cubic1))
+
+#GETS nie odrzucamy SMB
+linearHypothesis(cubic1, "I(Mkt.RF^3)", vcov.=vcovHAC(cubic1))
+G1cubic1 = lm(SMALL.LoBM ~  Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) +
+             I(SMB^3) + HML + I(HML^2) + I(HML^3), data=Dane3FF)
+coeftest(G1cubic1, vcov.=vcovHAC(G1cubic1))
+
+linearHypothesis(cubic1, c("I(Mkt.RF^3)","I(HML^2)"), vcov.=vcovHAC(cubic1))
+G2cubic1 = lm(SMALL.LoBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) +
+             I(SMB^3) + HML + I(HML^3), data=Dane3FF)
+coeftest(G2cubic1, vcov.=vcovHAC(G2cubic1))
+
+linearHypothesis(cubic1, c("I(Mkt.RF^3)","I(HML^2)","I(SMB^2)"), vcov.=vcovHAC(cubic1))
+G3cubic1 = lm(SMALL.LoBM ~ Mkt.RF + I(Mkt.RF^2) + SMB +
+             I(SMB^3) + HML + I(HML^3), data=Dane3FF)
+coeftest(G3cubic1, vcov.=vcovHAC(G3cubic1))
+
+linearHypothesis(cubic1, c("I(Mkt.RF^3)","I(HML^2)","I(SMB^2)","I(HML^3)"), vcov.=vcovHAC(cubic1))
+G3cubic1 = lm(SMALL.LoBM ~ Mkt.RF + I(Mkt.RF^2) + SMB +
+             I(SMB^3) + HML , data=Dane3FF)
+coeftest(G3cubic1, vcov.=vcovHAC(G3cubic1))
+
+linearHypothesis(cubic1, c("I(Mkt.RF^3)","I(HML^2)","I(SMB^2)","I(HML^3)","I(Mkt.RF^2)"), vcov.=vcovHAC(cubic1))
+G3cubic1 = lm(SMALL.LoBM ~ Mkt.RF + SMB +
+             I(SMB^3) + HML , data=Dane3FF)
+coeftest(G3cubic1, vcov.=vcovHAC(G3cubic1))
+
+Coef = data.frame()
+Stats = data.frame()
+Coef<-t(as.data.frame(rbind(coeftest(G3cubic1, vcov.=vcovHAC(G3cubic1))[,1],
+                     coeftest(G3cubic1, vcov.=vcovHAC(G3cubic1))[,4])))
+
+
+#p-v ^2=0
+Stats<-rbind(Stats,-1)
+#p-v ^3=0
+Stats<-rbind(Stats,linearHypothesis(G3cubic1, c("I(SMB^3)"))["Pr(>F)"][2,])
+#p-v ^2 i ^3=0
+Stats<-rbind(Stats,-1)
+#rest fit
+Stats<-rbind(Stats,resettest(G3cubic1, power=2:3, type="fitted")$p.value)
+#rest reg (rhs)
+Stats<-rbind(Stats,resettest(G3cubic1, power=2:3, type="regressor")$p.value)
+#Breusch-Godfrey
+Stats<-rbind(Stats,bgtest(G3cubic1, order = 1)$p.value)
+#R^2
+Stats<-rbind(Stats,summary(G3cubic1)$r.squared)
+#Adjusted R^2
+Stats<-rbind(Stats,summary(G3cubic1)$adj.r.squared)
+#AIC
+Stats<-rbind(Stats,AIC(G3cubic1))
+#SIC
+Stats<-rbind(Stats,BIC(G3cubic1))
+#N
+Stats<-rbind(Stats,summary(G3cubic1)$df[1]+summary(G3cubic1)$df[2])
+
+write.xlsx(Coef,"cubic_SMALL.LoBM.xlsx", sheetName="Coef")
+write.xlsx(Stats,"cubic_SMALL.LoBM.xlsx", sheetName="Stats", append=TRUE)
+```
+## ME1.BM2
+```{r}
+#1) Portfel
+cubic2 = lm(ME1.BM2 ~ Mkt.RF + I(Mkt.RF^2) + I(Mkt.RF^3) + SMB + I(SMB^2) +
+             I(SMB^3) + HML + I(HML^2) + I(HML^3), data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+#NIE PRZECHODZI RESET
+resettest(cubic2, power=2:3, type="fitted")
+#macierz odporna
+coeftest(cubic2, vcov.=vcovHAC(cubic2))
+
+#GETS nie odrzucamy SMB
+linearHypothesis(cubic2, "I(Mkt.RF^3)", vcov.=vcovHAC(cubic2))
+G1cubic2 = lm(ME1.BM2 ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) +
+             I(SMB^3) + HML + I(HML^2) + I(HML^3), data=Dane3FF)
+coeftest(G1cubic2, vcov.=vcovHAC(G1cubic2))
+
+linearHypothesis(cubic2, c("I(Mkt.RF^3)","I(HML^2)"), vcov.=vcovHAC(cubic2))
+G2cubic2 = lm(ME1.BM2 ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) +
+             I(SMB^3) + HML + I(HML^3), data=Dane3FF)
+coeftest(G2cubic2, vcov.=vcovHAC(G2cubic2))
+
+linearHypothesis(cubic2, c("I(Mkt.RF^3)","I(HML^2)","I(SMB^2)"), vcov.=vcovHAC(cubic2))
+G3cubic2 = lm(ME1.BM2 ~ Mkt.RF + I(Mkt.RF^2) + SMB +
+             I(SMB^3) + HML + I(HML^3), data=Dane3FF)
+coeftest(G3cubic2, vcov.=vcovHAC(G3cubic2))
+
+Coef = data.frame()
+Stats = data.frame()
+Coef<-t(as.data.frame(rbind(coeftest(G3cubic2, vcov.=vcovHAC(G3cubic2))[,1],
+                     coeftest(G3cubic2, vcov.=vcovHAC(G3cubic2))[,4])))
+
+#p-v ^2=0
+Stats<-rbind(Stats,linearHypothesis(G3cubic2, "I(Mkt.RF^2)")["Pr(>F)"][2,])
+#p-v ^3=0
+Stats<-rbind(Stats,linearHypothesis(G3cubic2, c("I(HML^3)","I(SMB^3)"))["Pr(>F)"][2,])
+#p-v ^2 i ^3=0
+Stats<-rbind(Stats,linearHypothesis(G3cubic2, c("I(Mkt.RF^2)","I(HML^3)","I(SMB^3)"))["Pr(>F)"][2,])
+#rest fit
+Stats<-rbind(Stats,resettest(G3cubic2, power=2:3, type="fitted")$p.value)
+#rest reg (rhs)
+Stats<-rbind(Stats,resettest(G3cubic2, power=2:3, type="regressor")$p.value)
+#Breusch-Godfrey
+Stats<-rbind(Stats,bgtest(G3cubic2, order = 1)$p.value)
+#R^2
+Stats<-rbind(Stats,summary(G3cubic2)$r.squared)
+#Adjusted R^2
+Stats<-rbind(Stats,summary(G3cubic2)$adj.r.squared)
+#AIC
+Stats<-rbind(Stats,AIC(G3cubic2))
+#SIC
+Stats<-rbind(Stats,BIC(G3cubic2))
+#N
+Stats<-rbind(Stats,summary(G3cubic2)$df[1]+summary(G3cubic2)$df[2])
+
+write.xlsx(Coef,"cubic_ME1.BM2.xlsx", sheetName="Coef")
+write.xlsx(Stats,"cubic_ME1.BM2.xlsx", sheetName="Stats", append=TRUE)
+```
+## SMALL.HiBM
+```{r}
+#1) Portfel
+cubic3 = lm(SMALL.HiBM ~ Mkt.RF + I(Mkt.RF^2) + I(Mkt.RF^3) + SMB + I(SMB^2) +
+             I(SMB^3) + HML + I(HML^2) + I(HML^3), data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+#NIE PRZECHODZI RESET
+resettest(cubic3, power=2:3, type="fitted")
+#macierz odporna
+coeftest(cubic3, vcov.=vcovHAC(cubic3))
+
+#GETS nie odrzucamy SMB
+linearHypothesis(cubic3, "I(Mkt.RF^3)", vcov.=vcovHAC(cubic3))
+G1cubic3 = lm(SMALL.HiBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) +
+             I(SMB^3) + HML + I(HML^2) + I(HML^3), data=Dane3FF)
+coeftest(G1cubic3, vcov.=vcovHAC(G1cubic3))
+
+linearHypothesis(cubic3, c("I(Mkt.RF^3)","I(HML^3)"), vcov.=vcovHAC(cubic3))
+G2cubic3 = lm(SMALL.HiBM ~ Mkt.RF + I(Mkt.RF^2) + SMB + I(SMB^2) +
+             I(SMB^3) + HML + I(HML^2), data=Dane3FF)
+coeftest(G2cubic3, vcov.=vcovHAC(G2cubic3))
+
+linearHypothesis(cubic3, c("I(Mkt.RF^3)","I(HML^3)","I(Mkt.RF^2)"), vcov.=vcovHAC(cubic3))
+G3cubic3 = lm(SMALL.HiBM ~ Mkt.RF + SMB + I(SMB^2) +
+             I(SMB^3) + HML + I(HML^2), data=Dane3FF)
+coeftest(G3cubic3, vcov.=vcovHAC(G3cubic3))
+
+linearHypothesis(cubic3, c("I(Mkt.RF^3)","I(HML^3)","I(Mkt.RF^2)","I(HML^2)"), vcov.=vcovHAC(cubic3))
+G3cubic3 = lm(SMALL.HiBM ~ Mkt.RF + SMB + I(SMB^2) +
+             I(SMB^3) + HML, data=Dane3FF)
+coeftest(G3cubic3, vcov.=vcovHAC(G3cubic3))
+
+
+Coef = data.frame()
+Stats = data.frame()
+Coef<-t(as.data.frame(rbind(coeftest(G3cubic3, vcov.=vcovHAC(G3cubic3))[,1],
+                     coeftest(G3cubic3, vcov.=vcovHAC(G3cubic3))[,4])))
+
+#p-v ^2=0 nie ma
+Stats<-rbind(Stats,linearHypothesis(G3cubic3, c("I(SMB^2)"))["Pr(>F)"][2,])
+#p-v ^3=0
+Stats<-rbind(Stats,linearHypothesis(G3cubic3, "I(SMB^3)")["Pr(>F)"][2,])
+#p-v ^2 i ^3=0
+Stats<-rbind(Stats,linearHypothesis(G3cubic3, c("I(SMB^2)","I(SMB^3)"))["Pr(>F)"][2,])
+#rest fit
+Stats<-rbind(Stats,resettest(G3cubic3, power=2:3, type="fitted")$p.value)
+#rest reg (rhs)
+Stats<-rbind(Stats,resettest(G3cubic3, power=2:3, type="regressor")$p.value)
+#Breusch-Godfrey
+Stats<-rbind(Stats,bgtest(G3cubic3, order = 1)$p.value)
+#R^2
+Stats<-rbind(Stats,summary(G3cubic3)$r.squared)
+#Adjusted R^2
+Stats<-rbind(Stats,summary(G3cubic3)$adj.r.squared)
+#AIC
+Stats<-rbind(Stats,AIC(G3cubic3))
+#SIC
+Stats<-rbind(Stats,BIC(G3cubic3))
+#N
+Stats<-rbind(Stats,summary(G3cubic3)$df[1]+summary(G3cubic3)$df[2])
+
+write.xlsx(Coef,"cubic_SMALL.HiBM.xlsx", sheetName="Coef")
+write.xlsx(Stats,"cubic_SMALL.HiBM.xlsx", sheetName="Stats", append=TRUE)
+```
+## BIG.LoBM
+```{r}
+#1) Portfel
+cubic4 = lm(BIG.LoBM ~ Mkt.RF + I(Mkt.RF^2) + I(Mkt.RF^3) + SMB + I(SMB^2) +
+             I(SMB^3) + HML + I(HML^2) + I(HML^3), data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+#NIE PRZECHODZI RESET
+resettest(cubic4, power=2:3, type="fitted")
+#macierz odporna
+coeftest(cubic4, vcov.=vcovHAC(cubic4))
+
+#GETS nie odrzucamy SMB
+linearHypothesis(cubic4, "I(Mkt.RF^2)", vcov.=vcovHAC(cubic4))
+G1cubic4 = lm(BIG.LoBM ~ Mkt.RF + I(Mkt.RF^3) + SMB + I(SMB^2) +
+             I(SMB^3) + HML + I(HML^2) + I(HML^3), data=Dane3FF)
+resettest(G1cubic4, power=2:3, type="fitted")
+coeftest(G1cubic4, vcov.=vcovHAC(G1cubic4))
+
+linearHypothesis(cubic4, c("I(Mkt.RF^2)","I(Mkt.RF^3)"), vcov.=vcovHAC(cubic4))
+G2cubic4 = lm(BIG.LoBM ~ Mkt.RF + SMB + I(SMB^2) +
+             I(SMB^3) + HML + I(HML^2) + I(HML^3), data=Dane3FF)
+resettest(G2cubic4, power=2:3, type="fitted")
+coeftest(G2cubic4, vcov.=vcovHAC(G2cubic4))
+
+linearHypothesis(cubic4, c("I(Mkt.RF^2)","I(Mkt.RF^3)","I(HML^3)"), vcov.=vcovHAC(cubic4))
+G3cubic4 = lm(BIG.LoBM ~ Mkt.RF + SMB + I(SMB^2) +
+             I(SMB^3) + HML + I(HML^2), data=Dane3FF)
+coeftest(G3cubic4, vcov.=vcovHAC(G3cubic4))
+
+linearHypothesis(cubic4, c("I(HML^2)","I(Mkt.RF^3)","I(HML^3)","I(SMB^2)"), vcov.=vcovHAC(cubic4))
+G4cubic4 = lm(BIG.LoBM ~ Mkt.RF + SMB +
+             I(SMB^3) + HML + I(HML^2), data=Dane3FF)
+resettest(G4cubic4, power=2:3, type="fitted")
+coeftest(G4cubic4, vcov.=vcovHAC(G4cubic4))
+
+linearHypothesis(cubic4, c("I(HML^2)","I(Mkt.RF^3)","I(HML^3)","I(SMB^2)","I(SMB^3)"), vcov.=vcovHAC(cubic4))
+G4cubic4 = lm(BIG.LoBM ~ Mkt.RF + SMB + HML + I(HML^2), data=Dane3FF)
+resettest(G4cubic4, power=2:3, type="fitted")
+coeftest(G4cubic4, vcov.=vcovHAC(G4cubic4))
+
+Coef = data.frame()
+Stats = data.frame()
+Coef<-t(as.data.frame(rbind(coeftest(G4cubic4, vcov.=vcovHAC(G4cubic4))[,1],
+                     coeftest(G4cubic4, vcov.=vcovHAC(G4cubic4))[,4])))
+
+#p-v ^2=0 nie ma
+Stats<-rbind(Stats,linearHypothesis(G4cubic4, "I(HML^2)")["Pr(>F)"][2,])
+#p-v ^3=0
+Stats<-rbind(Stats,-1)
+#p-v ^2 i ^3=0
+Stats<-rbind(Stats,-1)
+#rest fit
+Stats<-rbind(Stats,resettest(G4cubic4, power=2:3, type="fitted")$p.value)
+#rest reg (rhs)
+Stats<-rbind(Stats,resettest(G4cubic4, power=2:3, type="regressor")$p.value)
+#Breusch-Godfrey
+Stats<-rbind(Stats,bgtest(G4cubic4, order = 1)$p.value)
+#R^2
+Stats<-rbind(Stats,summary(G4cubic4)$r.squared)
+#Adjusted R^2
+Stats<-rbind(Stats,summary(G4cubic4)$adj.r.squared)
+#AIC
+Stats<-rbind(Stats,AIC(G4cubic4))
+#SIC
+Stats<-rbind(Stats,BIC(G4cubic4))
+#N
+Stats<-rbind(Stats,summary(G4cubic4)$df[1]+summary(G4cubic4)$df[2])
+
+write.xlsx(Coef,"cubic_BIG.LoBM.xlsx", sheetName="Coef")
+write.xlsx(Stats,"cubic_BIG.LoBM.xlsx", sheetName="Stats", append=TRUE)
+```
+## ME2.BM2
+```{r}
+#1) Portfel
+cubic5 = lm(ME2.BM2 ~ Mkt.RF + I(Mkt.RF^2) + I(Mkt.RF^3) + SMB + I(SMB^2) +
+             I(SMB^3) + HML + I(HML^2) + I(HML^3), data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+#NIE PRZECHODZI RESET
+resettest(cubic5, power=2:3, type="fitted")
+#macierz odporna
+coeftest(cubic5, vcov.=vcovHAC(cubic5))
+
+#GETS nie odrzucamy SMB
+linearHypothesis(cubic5, "I(SMB^2)", vcov.=vcovHAC(cubic5))
+G1cubic5 = lm(ME2.BM2 ~ Mkt.RF + I(Mkt.RF^2) + I(Mkt.RF^3) + SMB +
+             I(SMB^3) + HML + I(HML^2) + I(HML^3), data=Dane3FF)
+resettest(G1cubic5, power=2:3, type="fitted")
+coeftest(G1cubic5, vcov.=vcovHAC(G1cubic5))
+
+linearHypothesis(cubic5, c("I(SMB^2)","I(HML^3)"), vcov.=vcovHAC(cubic5))
+G2cubic5 = lm(ME2.BM2 ~ Mkt.RF + I(Mkt.RF^2) + I(Mkt.RF^3) + SMB +
+             I(SMB^3) + HML + I(HML^2), data=Dane3FF)
+resettest(G2cubic5, power=2:3, type="fitted")
+coeftest(G2cubic5, vcov.=vcovHAC(G2cubic5))
+
+linearHypothesis(cubic5, c("I(SMB^2)","I(Mkt.RF^2)","I(HML^2)"), vcov.=vcovHAC(cubic5))
+G3cubic5 = lm(ME2.BM2 ~ Mkt.RF + I(Mkt.RF^3) + SMB +
+             I(SMB^3) + HML + I(HML^3), data=Dane3FF)
+resettest(G3cubic5, power=2:3, type="fitted")
+coeftest(G3cubic5, vcov.=vcovHAC(G3cubic5))
+
+linearHypothesis(cubic5, c("I(SMB^2)","I(Mkt.RF^2)","I(HML^2)","I(Mkt.RF^3)"), vcov.=vcovHAC(cubic5))
+G4cubic5 = lm(ME2.BM2 ~ Mkt.RF + SMB + I(SMB^3) + HML, data=Dane3FF)
+resettest(G4cubic5, power=2:3, type="fitted")
+coeftest(G4cubic5, vcov.=vcovHAC(G4cubic5))
+
+
+
+Coef = data.frame()
+Stats = data.frame()
+Coef<-t(as.data.frame(rbind(coeftest(G4cubic5, vcov.=vcovHAC(G4cubic5))[,1],
+                     coeftest(G4cubic5, vcov.=vcovHAC(G4cubic5))[,4])))
+
+#p-v ^2=0 nie ma
+Stats<-rbind(Stats,-1)
+#p-v ^3=0
+Stats<-rbind(Stats,linearHypothesis(G4cubic5, "I(SMB^3)")["Pr(>F)"][2,])
+#p-v ^2 i ^3=0
+Stats<-rbind(Stats,-1)
+#rest fit
+Stats<-rbind(Stats,resettest(G4cubic5, power=2:3, type="fitted")$p.value)
+#rest reg (rhs)
+Stats<-rbind(Stats,resettest(G4cubic5, power=2:3, type="regressor")$p.value)
+#Breusch-Godfrey
+Stats<-rbind(Stats,bgtest(G4cubic5, order = 1)$p.value)
+#R^2
+Stats<-rbind(Stats,summary(G4cubic5)$r.squared)
+#Adjusted R^2
+Stats<-rbind(Stats,summary(G4cubic5)$adj.r.squared)
+#AIC
+Stats<-rbind(Stats,AIC(G4cubic5))
+#SIC
+Stats<-rbind(Stats,BIC(G4cubic5))
+#N
+Stats<-rbind(Stats,summary(G4cubic5)$df[1]+summary(G4cubic5)$df[2])
+
+write.xlsx(Coef,"cubic_ME2.BM2.xlsx", sheetName="Coef")
+write.xlsx(Stats,"cubic_ME2.BM2.xlsx", sheetName="Stats", append=TRUE)
+```
+## BIG.HiBM
+```{r}
+#1) Portfel
+cubic6 = lm(BIG.HiBM ~ Mkt.RF + I(Mkt.RF^2) + I(Mkt.RF^3) + SMB + I(SMB^2) +
+             I(SMB^3) + HML + I(HML^2) + I(HML^3), data=Dane3FF)
+#testy diagnostyczne
+#forma funkcyjna
+#NIE PRZECHODZI RESET
+resettest(cubic6, power=2:3, type="fitted")
+#macierz odporna
+coeftest(cubic6, vcov.=vcovHAC(cubic6))
+
+#GETS nie odrzucamy SMB
+linearHypothesis(cubic6, "I(SMB^2)", vcov.=vcovHAC(cubic6))
+G1cubic6 = lm(BIG.HiBM ~ Mkt.RF + I(Mkt.RF^2) + I(Mkt.RF^3) + SMB +
+             I(SMB^3) + HML + I(HML^2) + I(HML^3), data=Dane3FF)
+resettest(G1cubic6, power=2:3, type="fitted")
+coeftest(G1cubic6, vcov.=vcovHAC(G1cubic6))
+
+linearHypothesis(cubic6, c("I(SMB^2)","I(Mkt.RF^3)"), vcov.=vcovHAC(cubic6))
+G2cubic6 = lm(BIG.HiBM ~ Mkt.RF + I(Mkt.RF^2) + SMB +
+             I(SMB^3) + HML + I(HML^2) + I(HML^3), data=Dane3FF)
+resettest(G2cubic6, power=2:3, type="fitted")
+coeftest(G2cubic6, vcov.=vcovHAC(G2cubic6))
+
+linearHypothesis(cubic6, c("I(SMB^2)","I(Mkt.RF^3)","I(HML^2)"), vcov.=vcovHAC(cubic6))
+G3cubic6 = lm(BIG.HiBM ~ Mkt.RF + I(Mkt.RF^2) + SMB +
+             I(SMB^3) + HML + I(HML^3), data=Dane3FF)
+resettest(G3cubic6, power=2:3, type="fitted")
+coeftest(G3cubic6, vcov.=vcovHAC(G3cubic6))
+
+linearHypothesis(cubic6, c("I(SMB^2)","I(Mkt.RF^3)","I(HML^2)","I(HML^3)"), vcov.=vcovHAC(cubic6))
+G4cubic6 = lm(BIG.HiBM ~ Mkt.RF + I(Mkt.RF^2) + SMB +
+             I(SMB^3) + HML, data=Dane3FF)
+resettest(G4cubic6, power=2:3, type="fitted")
+coeftest(G4cubic6, vcov.=vcovHAC(G4cubic6))
+
+linearHypothesis(cubic6, c("I(SMB^2)","I(Mkt.RF^3)","I(HML^2)","I(HML^3)","I(Mkt.RF^2)"), vcov.=vcovHAC(cubic6))
+G5cubic6 = lm(BIG.HiBM ~ Mkt.RF  + SMB +
+             I(SMB^3) + HML, data=Dane3FF)
+resettest(G5cubic6, power=2:3, type="fitted")
+coeftest(G5cubic6, vcov.=vcovHAC(G5cubic6))
+
+Coef = data.frame()
+Stats = data.frame()
+Coef<-t(as.data.frame(rbind(coeftest(G5cubic6, vcov.=vcovHAC(G5cubic6))[,1],
+                     coeftest(G5cubic6, vcov.=vcovHAC(G5cubic6))[,4])))
+
+#p-v ^2=0 nie ma
+Stats<-rbind(Stats,-1)
+#p-v ^3=0
+Stats<-rbind(Stats,linearHypothesis(G5cubic6, "I(SMB^3)")["Pr(>F)"][2,])
+#p-v ^2 i ^3=0
+Stats<-rbind(Stats,-1)
+#rest fit
+Stats<-rbind(Stats,resettest(G5cubic6, power=2:3, type="fitted")$p.value)
+#rest reg (rhs)
+Stats<-rbind(Stats,resettest(G5cubic6, power=2:3, type="regressor")$p.value)
+#Breusch-Godfrey
+Stats<-rbind(Stats,bgtest(G5cubic6, order = 1)$p.value)
+#R^2
+Stats<-rbind(Stats,summary(G5cubic6)$r.squared)
+#Adjusted R^2
+Stats<-rbind(Stats,summary(G5cubic6)$adj.r.squared)
+#AIC
+Stats<-rbind(Stats,AIC(G5cubic6))
+#SIC
+Stats<-rbind(Stats,BIC(G5cubic6))
+#N
+Stats<-rbind(Stats,summary(G5cubic6)$df[1]+summary(G5cubic6)$df[2])
+
+write.xlsx(Coef,"cubic_BIG.HiBM.xlsx", sheetName="Coef")
+write.xlsx(Stats,"cubic_BIG.HiBM.xlsx", sheetName="Stats", append=TRUE)
+```
